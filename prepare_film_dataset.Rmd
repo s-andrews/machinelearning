@@ -1,0 +1,110 @@
+---
+title: "Different Models"
+output: html_notebook
+---
+
+This document demonstrates the different types of model which exist and their varying effectiveness.
+
+```{r message=FALSE}
+library(tidyverse)
+```
+
+
+Creating a Dataset
+==================
+
+We're going to make a dataset based off the IMDB film database.  We're using the database downloaded on 27th March 2023.  It comes in several parts which we're going to import and merge.
+
+First we'll get the basic film information.
+
+```{r}
+read_delim("Datasets/IMDB/title.basics.tsv") -> films
+```
+
+We'll just use the films, not TV series etc.
+
+```{r}
+films %>%
+    filter(titleType == "movie") -> films
+```
+
+
+Clean up some columns we're not going to use.
+
+```{r}
+films %>%
+  select (-primaryTitle, -endYear) %>%
+  mutate(runtimeMinutes = as.integer(runtimeMinutes)) %>%
+  filter(!is.na(runtimeMinutes)) %>%
+  filter(!endsWith(genres,"N")) -> films
+```
+
+We need to split the genres into separate columns.  First we'll extract the full list of genres
+
+```{r}
+films %>%
+  distinct(genres) %>%
+  arrange(desc(str_count(genres,","))) %>%
+  separate_wider_delim(genres,delim = ",",names_sep = ":", too_few = "align_start") %>%
+  pivot_longer(
+    cols=everything(),
+    names_to="temp",
+    values_to="genre"
+  ) %>%
+  distinct(genre) %>%
+  filter(!is.na(genre)) %>%
+  pull(genre) -> genres
+```
+
+Now we'll make a column for each of them.
+
+```{r}
+sapply(genres,function(x) films[[paste0("genre_",x)]] <<- as.numeric(str_detect(films$genres,x)))
+```
+
+Now we can lose the genres column
+
+```{r}
+films %>%
+  select(-genres) -> films
+```
+
+Next we want to add information about the director.  We need the director table and the names.
+
+```{r}
+read_delim("Datasets/IMDB/title.crew.tsv") -> director
+read_delim("Datasets/IMDB/name.basics.tsv") -> names
+
+director %>%
+  select(tconst, directors) %>%
+  mutate(nconst=str_replace(directors,",.*","")) %>%
+  select(-directors) %>%
+  left_join(
+    names %>%select(nconst, primaryName, birthYear)
+  ) %>%
+  right_join(films) %>%
+  select(-nconst) %>%
+  rename(director = primaryName, director_birthYear = birthYear) -> films
+
+rm(director)
+```
+
+
+We want to know how many films each director has directed at the point of each films release.
+
+```{r}
+films %>%
+  mutate(startYear = as.integer(startYear)) %>%
+  filter(!is.na(startYear)) %>%
+  mutate(director_birthYear = as.integer(director_birthYear)) %>%
+  filter(!is.na(director_birthYear)) %>%
+  rename(year_of_release = startYear) %>%
+  group_by(director) %>%
+  arrange(year_of_release) %>%
+  mutate(directors_film = 1:n()) %>%
+  ungroup() %>%
+  mutate(directors_age = year_of_release - director_birthYear) -> films
+
+```
+
+
