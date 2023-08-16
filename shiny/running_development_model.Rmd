@@ -1,0 +1,358 @@
+---
+title: "Development Gene Expression"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+---
+
+This shows the use of various model types to try to predict whether genes are development genes based on their gene expression.
+
+The data comes from GSE1133 and the developmental genes come from GO:003250
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+tidymodels_prefer()
+```
+
+Load the Data
+=============
+
+```{r}
+read_delim("development_gene_expression.txt") -> data
+
+# The predicted variable needs to be factor
+data %>%
+  mutate(Development=factor(Development)) %>%
+  select(Development,everything()) -> data
+
+# We want to randomly shuffle the rows so there is no structure
+set.seed(123)
+data %>%
+  sample_frac() -> data
+
+head(data)
+
+```
+
+We remove the gene names since we're not using those and then split the rest into test/training
+
+```{r}
+data %>%
+  select(-gene) %>%
+  initial_split(prop=0.8) -> split_data
+
+split_data
+```
+
+
+Create a model
+==============
+
+Decision Tree
+-------------
+
+We can now build a model - we'll start with a simple decision tree
+
+```{r}
+decision_tree(tree_depth = 10) %>%
+  set_mode("classification") %>%
+  set_engine("rpart") -> model
+
+model %>% translate()
+```
+
+```{r}
+model %>%
+  fit(Development ~ ., data=training(split_data)) -> model_fit
+
+model_fit
+```
+
+### Train the model
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count()
+```
+
+
+### Test the model
+
+#### Original Data
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() 
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+#### New Data
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count()
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+
+Random Forest
+-------------
+
+```{r}
+rand_forest(trees=100, min_n=5) %>%
+  set_mode("classification") %>%
+  set_engine("ranger") -> model
+
+model %>% translate()
+```
+
+### Train the model
+
+```{r}
+model %>%
+  fit(Development ~ ., data=training(split_data)) -> model_fit
+
+model_fit
+```
+
+### Test the model
+
+#### Original Data
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() 
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+#### New Data
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count()
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+
+Nearest Neighbour
+-----------------
+
+KNN model
+
+```{r}
+nearest_neighbor(neighbors = 20, weight_func = "triangular") %>%
+  set_mode("classification") %>%
+  set_engine("kknn") -> model
+
+model %>% translate()
+```
+
+### Train the model
+
+```{r}
+model %>%
+  fit(Development ~ ., data=training(split_data)) -> model_fit
+
+model_fit
+```
+
+### Test the model
+
+#### Original Data
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() 
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+#### New Data
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count()
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+Neural Net
+----------
+
+
+```{r}
+mlp(epochs = 1000, hidden_units = 200, penalty = 0.01, learn_rate = 0.01) %>% 
+  set_engine("brulee", validation = 0) %>% 
+  set_mode("classification") -> model
+
+model %>% translate()
+```
+
+### Train the model
+
+```{r}
+model %>%
+  fit(Development ~ ., data=training(split_data)) -> model_fit
+
+model_fit
+```
+
+### Test the model
+
+#### Original Data
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() 
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+#### New Data
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count()
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+

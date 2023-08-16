@@ -1,0 +1,127 @@
+---
+title: "Model Optimisation"
+output: html_notebook
+---
+
+We're looking at what we can do to change the parameters for a model to see how well it performs.
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+tidymodels_prefer()
+```
+
+Load the Data
+=============
+
+```{r}
+read_delim("development_gene_expression.txt") -> data
+
+# The predicted variable needs to be factor
+data %>%
+  mutate(Development=factor(Development)) %>%
+  select(Development,everything()) -> data
+
+# We want to randomly shuffle the rows so there is no structure
+set.seed(123)
+data %>%
+  sample_frac() -> data
+
+head(data)
+
+```
+
+We remove the gene names since we're not using those and then split the rest into test/training
+
+```{r}
+data %>%
+  select(-gene) %>%
+  initial_split(prop=0.8) -> split_data
+
+split_data
+```
+
+Set the main options
+====================
+
+```{r}
+number_of_trees_to_build = 100
+random_predictors_per_node = 20
+minimum_measures_per_node = 5
+```
+
+
+
+
+Random Forest
+-------------
+
+```{r}
+rand_forest(trees=number_of_trees_to_build, min_n=minimum_measures_per_node, mtry=random_predictors_per_node) %>%
+  set_mode("classification") %>%
+  set_engine("ranger") -> model
+
+model %>% translate()
+```
+
+### Train the model
+
+```{r}
+model %>%
+  fit(Development ~ ., data=training(split_data)) -> model_fit
+
+model_fit
+```
+
+### Test the model
+
+#### Original Data
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() 
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=training(split_data)) %>%
+  bind_cols(training(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
+
+#### New Data
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count()
+```
+
+```{r}
+model_fit %>%
+  predict(new_data=testing(split_data)) %>%
+  bind_cols(testing(split_data)) %>%
+  group_by(.pred_class, Development) %>%
+  count() %>%
+  mutate(
+    correct = .pred_class==Development
+  ) %>%
+  group_by(correct) %>%
+  summarise(
+    n=sum(n)
+  )
+```
