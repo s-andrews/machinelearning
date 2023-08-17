@@ -113,7 +113,6 @@ server <- function(input, output, session) {
   
   ## summary of training counts ----
   training_summary <- reactive({
-    
     summarise_metrics(training_counts()) 
   })
   
@@ -130,7 +129,6 @@ server <- function(input, output, session) {
   
   ## Summary of test counts ----
   test_summary <- reactive({
-    
     summarise_metrics(test_counts())
   })
   
@@ -141,17 +139,26 @@ server <- function(input, output, session) {
     rownames = FALSE, 
     options = list(dom = "t")
   )
+  
   output$test_original_correct <- DT::renderDataTable(
-    training_summary(), caption = "Summary of training data", rownames = FALSE, options = list(dom = "t")
+    training_summary(), 
+    caption = "Summary of training data", 
+    rownames = FALSE, 
+    options = list(dom = "t")
   )
+  
   output$test_new_data <- DT::renderDataTable(
     pivot_counts(test_counts()), 
     caption = "New test data", 
     rownames = FALSE, 
     options = list(dom = "t")
   )
+  
   output$test_new_correct <- DT::renderDataTable(
-    test_summary(), caption = "Summary of test data", rownames = FALSE, options = list(dom = "t")
+    test_summary(), 
+    caption = "Summary of test data", 
+    rownames = FALSE, 
+    options = list(dom = "t")
   )
   
   # Output text ----

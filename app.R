@@ -81,7 +81,6 @@ server <- function(input, output) {
   
   # Train the model ----
   model_fit <- reactive({
-    
     fit(model(), Development ~ ., data=training(split_data))
   })
   
@@ -100,7 +99,6 @@ server <- function(input, output) {
   
   ## summary of training counts ----
   training_summary <- reactive({
-    
     summarise_metrics(training_counts())
   })
   
@@ -117,8 +115,6 @@ server <- function(input, output) {
   
   ## Summary of test counts ----
   test_summary <- reactive({
-
-    #summarise_correct_counts(test_counts())
     summarise_metrics(test_counts())
   })
       
@@ -129,17 +125,26 @@ server <- function(input, output) {
     rownames = FALSE, 
     options = list(dom = "t")
   )
+  
   output$test_original_correct <- DT::renderDataTable(
-    training_summary(), caption = "Summary of training data", rownames = FALSE, options = list(dom = "t")
+    training_summary(), 
+    caption = "Summary of training data", 
+    rownames = FALSE, 
+    options = list(dom = "t")
   )
+  
   output$test_new_data <- DT::renderDataTable(
     pivot_counts(test_counts()), 
     caption = "New test data", 
     rownames = FALSE, 
     options = list(dom = "t")
   )
+  
   output$test_new_correct <- DT::renderDataTable(
-    test_summary(), caption = "Summary of test data", rownames = FALSE, options = list(dom = "t")
+    test_summary(), 
+    caption = "Summary of test data", 
+    rownames = FALSE, 
+    options = list(dom = "t")
   )
   
   # Output text ----
