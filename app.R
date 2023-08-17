@@ -1,3 +1,7 @@
+Sys.setenv(TORCH_INSTALL=1)
+Sys.setenv(TORCH_HOME=path.expand("libtorch/"))
+library(torch)
+
 library(shiny)
 library(tidyverse)
 library(tidymodels)
