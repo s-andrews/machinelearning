@@ -1,6 +1,8 @@
 library(shiny)
+library(shinyvalidate)
 library(tidyverse)
 library(tidymodels)
+
 tidymodels_prefer()
 
 split_data <- readRDS("data/split_data.rds")
@@ -19,12 +21,30 @@ ui <- fluidPage(
       fluidRow(
         column(
           width = 6, 
-          numericInput(inputId = "number_of_trees_to_build", label = "Number of trees", value = 100),
-          numericInput(inputId = "random_predictors_per_node", label = "Random predictors per node", value = 20)
+          numericInput(
+            inputId = "number_of_trees_to_build", 
+            label = "Number of trees",
+            min = 2, 
+            max = 200, 
+            value = 100
+          ),
+          numericInput(
+            inputId = "random_predictors_per_node", 
+            label = "Random predictors per node", 
+            value = 20,
+            min = 2, 
+            max = 90
+          )
         ),
         column(
           width = 6,
-          numericInput(inputId = "minimum_measures_per_node", label = "Minimum measures per node", value = 5),
+          numericInput(
+            inputId = "minimum_measures_per_node", 
+            label = "Minimum measures per node", 
+            value = 5,
+            min = 1,
+            max = 5
+          ),
           actionButton(inputId = "create_model", label = "Run model")
         )
       ),
@@ -50,17 +70,27 @@ server <- function(input, output, session) {
   
   observeEvent(input$browser, browser())
   
+  # Set up validator for numeric inputs ----
+  iv <- InputValidator$new()
+  iv$add_rule("number_of_trees_to_build", sv_between(2, 200))
+  iv$add_rule("random_predictors_per_node", sv_between(2, 90))
+  iv$add_rule("minimum_measures_per_node", sv_between(1, 20))
+  iv$enable()
+  
   # Create model ----  
   model <- reactive({
+    
+    req(iv$is_valid())
+    
     rand_forest(
       trees = isolate(input$number_of_trees_to_build), 
       min_n = isolate(input$minimum_measures_per_node), 
       mtry = isolate(input$random_predictors_per_node)
     ) %>%
-        set_mode("classification") %>%
-        set_engine("ranger")
+      set_mode("classification") %>%
+      set_engine("ranger")
   }) %>%
-  bindEvent(input$create_model)
+    bindEvent(input$create_model)
   
   # Train the model ----
   model_fit <- reactive({
