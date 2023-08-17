@@ -11,3 +11,38 @@ summarise_correct_counts <- function(tbl){
       n=sum(n)
     )
 }
+
+# count table of predictions
+pivot_counts <- function(tbl){
+  
+  tbl %>%
+    pivot_wider(
+      names_from=.pred_class,
+      values_from=n,
+      names_prefix = "predicted_"
+    ) %>%
+    rename(True_development=Development)
+}
+
+
+summarise_metrics <- function(tbl){
+  
+  n_correct <- summarise_correct_counts(tbl) %>%
+    rename(c(estimate_or_n=n, metric=correct))
+  
+  met1 <- tbl %>%
+    metrics(Development, .pred_class) 
+  
+  met2 <- tbl %>%
+    sens(Development, .pred_class)
+  
+  met3 <- tbl %>%
+    spec(Development, .pred_class)
+  
+  rbind(met1, met2, met3) %>%
+    select(-`.estimator`) %>%
+    rename(c(metric = `.metric`, estimate_or_n = `.estimate`)) %>%
+    rbind(n_correct)
+  
+}
+

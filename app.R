@@ -47,7 +47,7 @@ ui <- fluidPage(
         verbatimTextOutput(outputId = "model_info1"),
         verbatimTextOutput(outputId = "model_info2")
       )#,
-     # actionButton(inputId = "browser", label = "browser")
+     #actionButton(inputId = "browser", label = "browser")
     ),
   
     mainPanel(width = 6,
@@ -93,13 +93,15 @@ server <- function(input, output) {
       predict(new_data=training(split_data)) %>%
       bind_cols(training(split_data)) %>%
       group_by(.pred_class, Development) %>%
-      count() 
+      count() %>%
+      ungroup() 
+    
   })
   
   ## summary of training counts ----
   training_summary <- reactive({
     
-    summarise_correct_counts(training_counts())
+    summarise_metrics(training_counts())
   })
   
   ## Test counts ----
@@ -109,24 +111,32 @@ server <- function(input, output) {
       predict(new_data=testing(split_data)) %>%
       bind_cols(testing(split_data)) %>%
       group_by(.pred_class, Development) %>%
-      count()
+      count() %>%
+      ungroup() 
   })
   
   ## Summary of test counts ----
   test_summary <- reactive({
 
-    summarise_correct_counts(test_counts())
+    #summarise_correct_counts(test_counts())
+    summarise_metrics(test_counts())
   })
       
   # Output tables ----
   output$test_original_data <- DT::renderDataTable(
-    training_counts(), caption = "Original training data", rownames = FALSE, options = list(dom = "t")
+    pivot_counts(training_counts()), 
+    caption = "Original training data", 
+    rownames = FALSE, 
+    options = list(dom = "t")
   )
   output$test_original_correct <- DT::renderDataTable(
     training_summary(), caption = "Summary of training data", rownames = FALSE, options = list(dom = "t")
   )
   output$test_new_data <- DT::renderDataTable(
-    test_counts(), caption = "New test data", rownames = FALSE, options = list(dom = "t")
+    pivot_counts(test_counts()), 
+    caption = "New test data", 
+    rownames = FALSE, 
+    options = list(dom = "t")
   )
   output$test_new_correct <- DT::renderDataTable(
     test_summary(), caption = "Summary of test data", rownames = FALSE, options = list(dom = "t")
