@@ -10,26 +10,43 @@ split_data <- readRDS("data/split_data.rds")
 # App for selecting machine learning algorithm
 ui <- fluidPage(
 
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
+  ),
+  
   titlePanel("Machine learning course"),
+  br(),
   
   sidebarLayout(
-    sidebarPanel(
-      selectInput(
-        inputId = "model_selector",
-        label = "Select model",
-        choices = list(
-          "Decision tree" = "decisiontree", 
-          "Random forest" = "randomforest", 
-          "Nearest neighbour" = "nneighbour",
-          "Neural network" = "neuralnet"
-        )
-      ),
-      br(),
-      actionButton(inputId = "create_model", label = "Run model")#,
-      #actionButton(inputId = "browser", label = "browser")
+    sidebarPanel(width = 6,
+      verticalLayout(
+        fluidRow(
+          column(
+            width = 6, 
+            selectInput(
+              inputId = "model_selector",
+              label = NULL,
+              choices = list(
+                "Decision tree" = "decisiontree", 
+                "Random forest" = "randomforest", 
+                "Nearest neighbour" = "nneighbour",
+                "Neural network" = "neuralnet"
+              )
+            )
+          ),
+          column(
+            width = 6, 
+            actionButton(inputId = "create_model", label = "Run model")
+          )
+        ),
+        br(),
+        verbatimTextOutput(outputId = "model_info1"),
+        verbatimTextOutput(outputId = "model_info2")
+      )#,
+     # actionButton(inputId = "browser", label = "browser")
     ),
   
-    mainPanel(
+    mainPanel(width = 6,
       DT::dataTableOutput("test_original_data"),
       br(),
       DT::dataTableOutput("test_original_correct"),
@@ -47,7 +64,7 @@ server <- function(input, output) {
   observeEvent(input$browser, browser())
   
   # Create model ----
-  model <- eventReactive(input$create_model, {
+  model <- reactive({
 
     switch(input$model_selector,
       decisiontree = get_decision_tree(),
@@ -55,14 +72,13 @@ server <- function(input, output) {
       nneighbour = get_nneighbour(),
       neuralnet = get_neuralnet()
     )
-    
-  })
+  }) %>%
+    bindEvent(input$create_model)
   
   # Train the model ----
   model_fit <- reactive({
     
     fit(model(), Development ~ ., data=training(split_data))
-    
   })
   
   # Test the model ----
@@ -79,14 +95,7 @@ server <- function(input, output) {
   ## summary of training counts ----
   training_summary <- reactive({
     
-    training_counts() %>%
-      mutate(
-        correct = .pred_class==Development
-      ) %>%
-      group_by(correct) %>%
-      summarise(
-        n=sum(n)
-      )
+    summarise_correct_counts(training_counts())
   })
   
   ## Test counts ----
@@ -101,31 +110,34 @@ server <- function(input, output) {
   
   ## Summary of test counts ----
   test_summary <- reactive({
-    
-    test_counts() %>%
-      mutate(
-        correct = .pred_class==Development
-      ) %>%
-      group_by(correct) %>%
-      summarise(
-        n=sum(n)
-      )
+
+    summarise_correct_counts(test_counts())
   })
-  
+      
   # Output tables ----
   output$test_original_data <- DT::renderDataTable(
-    training_counts(), rownames = FALSE, options = list(dom = "t")
+    training_counts(), caption = "Original training data", rownames = FALSE, options = list(dom = "t")
   )
   output$test_original_correct <- DT::renderDataTable(
-    training_summary(), rownames = FALSE, options = list(dom = "t")
+    training_summary(), caption = "Summary of training data", rownames = FALSE, options = list(dom = "t")
   )
   output$test_new_data <- DT::renderDataTable(
-    test_counts(), rownames = FALSE, options = list(dom = "t")
+    test_counts(), caption = "New test data", rownames = FALSE, options = list(dom = "t")
   )
   output$test_new_correct <- DT::renderDataTable(
-    test_summary(), rownames = FALSE, options = list(dom = "t")
+    test_summary(), caption = "Summary of test data", rownames = FALSE, options = list(dom = "t")
   )
   
+  # Output text ----
+  output$model_info1 <- renderPrint({
+    h2("Model information")
+    model() %>% translate()
+  })
+
+  output$model_info2 <- renderPrint({
+    model_fit() 
+  })
+
 }
 
 # Run the application 
