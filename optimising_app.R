@@ -145,17 +145,22 @@ server <- function(input, output, session) {
   
   # Output tables ----
   output$test_original_data <- DT::renderDataTable(
-    pivot_counts(training_counts()),
-    caption = "Original training data", 
-    rownames = FALSE, 
-    options = list(dom = "t")
+    
+      pivot_counts(training_counts()),
+      caption = "Original training data", 
+      rownames = FALSE, 
+      options = list(dom = "t")
+   
   )
   
   output$test_original_correct <- DT::renderDataTable(
-    training_summary(), 
-    caption = "Summary of training data", 
-    rownames = FALSE, 
-    options = list(dom = "t")
+    DT::datatable(
+      training_summary(), 
+      caption = "Summary of training data", 
+      rownames = FALSE, 
+      options = list(dom = "t")
+    ) %>%
+    DT::formatRound(columns = "estimate_or_n", 3)
   )
   
   output$test_new_data <- DT::renderDataTable(
@@ -166,10 +171,13 @@ server <- function(input, output, session) {
   )
   
   output$test_new_correct <- DT::renderDataTable(
-    test_summary(), 
-    caption = "Summary of test data", 
-    rownames = FALSE, 
-    options = list(dom = "t")
+    DT::datatable(
+      test_summary(), 
+      caption = "Summary of test data", 
+      rownames = FALSE, 
+      options = list(dom = "t")
+    ) %>%
+      DT::formatRound(columns = "estimate_or_n", 3)
   )
   
   # Output text ----
