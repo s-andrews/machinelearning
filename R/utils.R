@@ -25,6 +25,7 @@ pivot_counts <- function(tbl){
 }
 
 
+# binding summary metrics into one tibble
 summarise_metrics <- function(tbl_counts, tbl_pred){
   
   n_correct <- summarise_correct_counts(tbl_counts) %>%
@@ -43,6 +44,29 @@ summarise_metrics <- function(tbl_counts, tbl_pred){
     dplyr::select(-`.estimator`) %>%
     dplyr::rename(c(metric = `.metric`, estimate_or_n = `.estimate`)) %>%
     rbind(n_correct)
-  
 }
+
+# counts table showing the true and false predictions
+counts_table <- function(tbl, title){
+  DT::datatable(
+    pivot_counts(tbl), 
+    caption = title, 
+    rownames = FALSE, 
+    options = list(dom = "t")
+  )
+}
+
+# table to show the summarised metrics
+summary_metrics_table <- function(tbl, title){
+  DT::datatable(
+    tbl, 
+    caption = title, 
+    rownames = FALSE, 
+    options = list(dom = "t")
+  ) %>%
+    DT::formatRound(columns = "estimate_or_n", 3)
+}
+
+
+
 

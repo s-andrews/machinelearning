@@ -145,44 +145,23 @@ server <- function(input, output, session) {
   
   # Output tables ----
   output$test_original_data <- DT::renderDataTable(
-    
-      pivot_counts(training_counts()),
-      caption = "Original training data", 
-      rownames = FALSE, 
-      options = list(dom = "t")
-   
+    counts_table(training_counts(), title = "Original training data") 
   )
   
-  output$test_original_correct <- DT::renderDataTable(
-    DT::datatable(
-      training_summary(), 
-      caption = "Summary of training data", 
-      rownames = FALSE, 
-      options = list(dom = "t")
-    ) %>%
-    DT::formatRound(columns = "estimate_or_n", 3)
-  )
+  output$test_original_correct <- DT::renderDataTable({
+    summary_metrics_table(training_summary(), title = "Summary of training data")
+  })
   
   output$test_new_data <- DT::renderDataTable(
-    pivot_counts(test_counts()), 
-    caption = "New test data", 
-    rownames = FALSE, 
-    options = list(dom = "t")
+    counts_table(test_counts(), title = "New test data")
   )
   
   output$test_new_correct <- DT::renderDataTable(
-    DT::datatable(
-      test_summary(), 
-      caption = "Summary of test data", 
-      rownames = FALSE, 
-      options = list(dom = "t")
-    ) %>%
-      DT::formatRound(columns = "estimate_or_n", 3)
+    summary_metrics_table(test_summary(), title = "Summary of test data")
   )
   
   # Output text ----
   output$model_info1 <- renderPrint({
-    h2("Model information")
     model() %>% translate()
   })
   
