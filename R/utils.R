@@ -25,18 +25,18 @@ pivot_counts <- function(tbl){
 }
 
 
-summarise_metrics <- function(tbl){
+summarise_metrics <- function(tbl_counts, tbl_pred){
   
-  n_correct <- summarise_correct_counts(tbl) %>%
+  n_correct <- summarise_correct_counts(tbl_counts) %>%
     dplyr::rename(c(estimate_or_n=n, metric=correct))
   
-  met1 <- tbl %>%
+  met1 <- tbl_pred %>%
     yardstick::metrics(Development, .pred_class) 
   
-  met2 <- tbl %>%
+  met2 <- tbl_pred %>%
     yardstick::sens(Development, .pred_class)
   
-  met3 <- tbl %>%
+  met3 <- tbl_pred %>%
     yardstick::spec(Development, .pred_class)
   
   rbind(met1, met2, met3) %>%

@@ -46,8 +46,8 @@ ui <- fluidPage(
         br(),
         verbatimTextOutput(outputId = "model_info1"),
         verbatimTextOutput(outputId = "model_info2")
-      )#,
-     #actionButton(inputId = "browser", label = "browser")
+      ),
+     actionButton(inputId = "browser", label = "browser")
     ),
   
     mainPanel(width = 6,
@@ -84,13 +84,25 @@ server <- function(input, output) {
     fit(model(), Development ~ ., data=training(split_data))
   })
   
+  # Predictions ----
+  training_predictions <- reactive({
+    model_fit() %>%
+      predict(new_data=training(split_data)) %>%
+      bind_cols(training(split_data))
+  })
+  
+  test_predictions <- reactive({
+    model_fit() %>%
+      predict(new_data=testing(split_data)) %>%
+      bind_cols(testing(split_data))
+  })
+  
+  
   # Test the model ----
   ## Training counts ----
   training_counts <- reactive({
     
-    model_fit() %>%
-      predict(new_data=training(split_data)) %>%
-      bind_cols(training(split_data)) %>%
+    training_predictions() %>%
       group_by(.pred_class, Development) %>%
       count() %>%
       ungroup() 
@@ -99,15 +111,13 @@ server <- function(input, output) {
   
   ## summary of training counts ----
   training_summary <- reactive({
-    summarise_metrics(training_counts())
+    summarise_metrics(training_counts(), training_predictions())
   })
   
   ## Test counts ----
   test_counts <- reactive({
     
-    model_fit() %>%
-      predict(new_data=testing(split_data)) %>%
-      bind_cols(testing(split_data)) %>%
+    test_predictions() %>%
       group_by(.pred_class, Development) %>%
       count() %>%
       ungroup() 
@@ -115,7 +125,7 @@ server <- function(input, output) {
   
   ## Summary of test counts ----
   test_summary <- reactive({
-    summarise_metrics(test_counts())
+    summarise_metrics(test_counts(), test_predictions())
   })
       
   # Output tables ----
