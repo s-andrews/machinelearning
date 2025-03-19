@@ -49,8 +49,8 @@ ui <- fluidPage(
         br(),
         verbatimTextOutput(outputId = "model_info1"),
         verbatimTextOutput(outputId = "model_info2")
-      ),
-     actionButton(inputId = "browser", label = "browser")
+      )#,
+    # actionButton(inputId = "browser", label = "browser")
     ),
   
     mainPanel(width = 6,
