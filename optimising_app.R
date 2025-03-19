@@ -95,7 +95,7 @@ server <- function(input, output, session) {
   # Train the model ----
   model_fit <- reactive({
     
-    fit(model(), Development ~ ., data=training(split_data))
+    fit(model(), cell_type_topred ~ ., data=training(split_data))
     
   })
   
@@ -118,7 +118,7 @@ server <- function(input, output, session) {
   training_counts <- reactive({
     
     training_predictions() %>%
-      group_by(.pred_class, Development) %>%
+      group_by(.pred_class, cell_type_topred) %>%
       count() %>%
       ungroup() 
     
@@ -133,7 +133,7 @@ server <- function(input, output, session) {
   test_counts <- reactive({
     
     test_predictions() %>%
-      group_by(.pred_class, Development) %>%
+      group_by(.pred_class, cell_type_topred) %>%
       count() %>%
       ungroup() 
   })
