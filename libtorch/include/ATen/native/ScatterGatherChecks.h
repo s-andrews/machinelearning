@@ -5,17 +5,17 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
 // checks whether index.dtype == int64
 // and self.dtype == src.dtype if src is a Tensor
-static void scatter_gather_dtype_check(
+inline void scatter_gather_dtype_check(
   const std::string& method_name,
   const Tensor& self,
   const Tensor& index,
-  const c10::optional<Tensor>& src_opt = c10::nullopt
+  const std::optional<Tensor>& src_opt = std::nullopt
 ) {
   if (index.numel() != 0) {
     TORCH_CHECK(
@@ -25,7 +25,7 @@ static void scatter_gather_dtype_check(
   }
 
   if (src_opt.has_value()) {
-    auto src = src_opt.value();
+    const auto& src = src_opt.value();
     TORCH_CHECK(
       self.scalar_type() == src.scalar_type(),
       method_name, "(): Expected self.dtype to be equal to src.dtype"
@@ -38,7 +38,7 @@ static void scatter_gather_dtype_check(
 // Test:
 // 1. index.size(d) <= self.size(d) for all d != dim
 // 2. index.dim() == self.dim()
-static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
+inline void gather_shape_check(const Tensor& self, int64_t dim,
   const Tensor& index
 ) {
   auto self_dims = ensure_nonempty_dim(self.dim());
@@ -64,9 +64,9 @@ static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
 //  1. index.size(d) <= self.size(d) for all d != dim
 //  2. index.size(d) <= src.size(d) for all d if src is a Tensor
 //  3. index.dim() == self.dim() == src.dim()
-static C10_UNUSED void scatter_shape_check(
+inline void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
-  const c10::optional<Tensor>& src_opt = c10::nullopt
+  const std::optional<Tensor>& src_opt = std::nullopt
 ) {
   if (index.numel() == 0) return;
   TORCH_CHECK(
@@ -89,7 +89,7 @@ static C10_UNUSED void scatter_shape_check(
 
   //  Check: index.size(d) <= src.size(d) for all d if src is Tensor
   if (!is_wrong_shape && src_opt.has_value()) {
-    auto src = src_opt.value();
+    const auto& src = src_opt.value();
     for (const auto d : c10::irange(self_dims)) {
       int64_t index_d_size = ensure_nonempty_size(index, d);
       if (index_d_size > ensure_nonempty_size(src, d)) {
@@ -100,7 +100,7 @@ static C10_UNUSED void scatter_shape_check(
   }
 
   if (src_opt.has_value()) {
-    auto src = src_opt.value();
+    const auto& src = src_opt.value();
 
     TORCH_CHECK(
       ensure_nonempty_dim(src.dim()) == ensure_nonempty_dim(index.dim()),
@@ -125,4 +125,4 @@ static C10_UNUSED void scatter_shape_check(
 
 } // anonymous namespace
 
-}} // namespace at::native
+} // namespace at::native

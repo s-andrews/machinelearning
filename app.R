@@ -11,6 +11,9 @@ tidymodels_prefer()
 
 split_data <- readRDS("data/split_data.rds")
 
+# column in dataset that contains the classification
+pred_column <- "cell_type_topred"
+
 # App for selecting machine learning algorithm
 ui <- fluidPage(
 
@@ -47,7 +50,7 @@ ui <- fluidPage(
         verbatimTextOutput(outputId = "model_info1"),
         verbatimTextOutput(outputId = "model_info2")
       )#,
-     #actionButton(inputId = "browser", label = "browser")
+    # actionButton(inputId = "browser", label = "browser")
     ),
   
     mainPanel(width = 6,
@@ -81,7 +84,8 @@ server <- function(input, output) {
   
   # Train the model ----
   model_fit <- reactive({
-    fit(model(), Development ~ ., data=training(split_data))
+    fit(model(), cell_type_topred ~ ., data=training(split_data))
+    #fit(model(), !!pred_column ~ ., data=training(split_data))
   })
   
   # Predictions ----
@@ -103,7 +107,8 @@ server <- function(input, output) {
   training_counts <- reactive({
     
     training_predictions() %>%
-      group_by(.pred_class, Development) %>%
+      #group_by(.pred_class, !!pred_column) %>%
+      group_by(.pred_class, cell_type_topred) %>%
       count() %>%
       ungroup() 
     
@@ -118,7 +123,7 @@ server <- function(input, output) {
   test_counts <- reactive({
     
     test_predictions() %>%
-      group_by(.pred_class, Development) %>%
+      group_by(.pred_class, cell_type_topred) %>%
       count() %>%
       ungroup() 
   })

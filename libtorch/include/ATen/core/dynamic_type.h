@@ -1,10 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 
 #include <ATen/core/jit_type_base.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 
@@ -56,6 +57,7 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(AnyEnum, DYNAMIC_TYPE_BIT(20), 1)                                        \
   _(RRef, DYNAMIC_TYPE_BIT(21), 0)                                           \
   _(Future, DYNAMIC_TYPE_BIT(22), 0)                                         \
+  _(Await, DYNAMIC_TYPE_BIT(23), 0)                                          \
   _(Any, 0xffffffff, 1)
 
 #define FORALL_DYNAMIC_TYPES_FAKE(_) \
@@ -119,7 +121,7 @@ class DynamicType : public SharedType {
    * A implementation detail to support NamedTuple.
    */
   struct LabeledDynamicType {
-    c10::optional<std::string> label;
+    std::optional<std::string> label;
     DynamicTypePtr ty;
     explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
 
@@ -161,7 +163,7 @@ class DynamicType : public SharedType {
   Tag tag() const {
     return tag_;
   }
-  const c10::optional<std::string>& name() const {
+  const std::optional<std::string>& name() const {
     return name_;
   }
   const Arguments& arguments() const {
@@ -185,7 +187,7 @@ class DynamicType : public SharedType {
   bool equals(const DynamicType& other) const;
 
   template <typename F>
-  bool compareArguments(const DynamicType& other, F&& f) const {
+  bool compareArguments(const DynamicType& other, const F& f) const {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }
@@ -198,7 +200,7 @@ class DynamicType : public SharedType {
   }
 
   Tag tag_;
-  c10::optional<std::string> name_;
+  std::optional<std::string> name_;
   union {
     Arguments arguments_;
     ClassTypePtr class_;

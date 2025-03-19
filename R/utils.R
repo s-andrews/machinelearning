@@ -1,10 +1,12 @@
+# column in dataset that contains the classification
+pred_column <- "cell_type_topred"
 
 # tbl is a tidymodels object with a .pred_class column
 summarise_correct_counts <- function(tbl){
   
   tbl %>%
   dplyr::mutate(
-    correct = .pred_class==Development
+    correct = .pred_class==cell_type_topred
   ) %>%
     dplyr::group_by(correct) %>%
     dplyr::summarise(
@@ -21,7 +23,8 @@ pivot_counts <- function(tbl){
       values_from=n,
       names_prefix = "predicted_"
     ) %>%
-    dplyr::rename(True_development=Development)
+    #dplyr::rename(True_development=Development)
+    dplyr::rename(True_pred=cell_type_topred)
 }
 
 
@@ -32,13 +35,13 @@ summarise_metrics <- function(tbl_counts, tbl_pred){
     dplyr::rename(c(estimate_or_n=n, metric=correct))
   
   met1 <- tbl_pred %>%
-    yardstick::metrics(Development, .pred_class) 
+    yardstick::metrics(cell_type_topred, .pred_class) 
   
   met2 <- tbl_pred %>%
-    yardstick::sens(Development, .pred_class)
+    yardstick::sens(cell_type_topred, .pred_class)
   
   met3 <- tbl_pred %>%
-    yardstick::spec(Development, .pred_class)
+    yardstick::spec(cell_type_topred, .pred_class)
   
   rbind(met1, met2, met3) %>%
     dplyr::select(-`.estimator`) %>%

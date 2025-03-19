@@ -21,9 +21,10 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
@@ -64,6 +65,7 @@ struct Node;
 namespace at {
 
 class OptionalTensorRef;
+class TensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 using ITensorList = c10::IListRef<Tensor>;
@@ -95,6 +97,7 @@ class TORCH_API Tensor: public TensorBase {
   explicit Tensor(unsafe_borrow_t, const TensorBase& rhs): TensorBase(unsafe_borrow_t{}, rhs) {}
   friend MaybeOwnedTraits<Tensor>;
   friend OptionalTensorRef;
+  friend TensorRef;
 
  public:
   Tensor() = default;
@@ -124,11 +127,17 @@ class TORCH_API Tensor: public TensorBase {
   Tensor conj() const {
     if (!this->is_complex()) {
       return *this;
-    } else {
-      if (this->is_sparse()) {
+    }
+
+    switch (this->layout()) {
+      case at::kSparse:
+      case at::kSparseCsr:
+      case at::kSparseCsc:
+      case at::kSparseBsr:
+      case at::kSparseBsc:
         return this->conj_physical();
-      }
-      return this->_conj();
+      default:
+        return this->_conj();
     }
   }
 
@@ -190,7 +199,7 @@ class TORCH_API Tensor: public TensorBase {
     impl_ = x.getIntrusivePtr();
     return *this;
   }
-  Tensor& operator=(TensorBase&& x) & {
+  Tensor& operator=(TensorBase&& x) & noexcept {
     impl_ = x.unsafeReleaseIntrusivePtr();
     return *this;
   }
@@ -198,11 +207,11 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator=(const Tensor &x) & {
     return operator=(static_cast<const TensorBase&>(x));
   }
-  Tensor& operator=(Tensor &&x) & {
+  Tensor& operator=(Tensor &&x) & noexcept {
     return operator=(static_cast<TensorBase&&>(x));
   }
 
-  Tensor& operator=(Scalar v) && {
+  Tensor& operator=(const Scalar &v) && {
     return fill_(v);
   }
   Tensor& operator=(const Tensor &rhs) && {
@@ -260,25 +269,25 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator+=(const Tensor & other) {
     return add_(other);
   }
-  Tensor& operator+=(Scalar other) {
+  Tensor& operator+=(const Scalar & other) {
     return add_(other);
   }
   Tensor& operator-=(const Tensor & other) {
     return sub_(other);
   }
-  Tensor& operator-=(Scalar other) {
+  Tensor& operator-=(const Scalar & other) {
     return sub_(other);
   }
   Tensor& operator*=(const Tensor & other) {
     return mul_(other);
   }
-  Tensor& operator*=(Scalar other) {
+  Tensor& operator*=(const Scalar & other) {
     return mul_(other);
   }
   Tensor& operator/=(const Tensor & other) {
     return div_(other);
   }
-  Tensor& operator/=(Scalar other) {
+  Tensor& operator/=(const Scalar & other) {
     return div_(other);
   }
   Tensor& operator&=(const Tensor & other) {
@@ -290,13 +299,13 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator^=(const Tensor & other) {
     return bitwise_xor_(other);
   }
-  Tensor operator[](Scalar index) const {
+  Tensor operator[](const Scalar & index) const {
     if (!index.isIntegral(false)) {
       TORCH_CHECK_INDEX(false, "Can only index tensors with integral scalars");
     }
     return this->operator[](index.toLong());
   }
-  Tensor operator[](Tensor index) const {
+  Tensor operator[](const Tensor & index) const {
     // These properties are checked in the Scalar constructor, but we already
     // check them here to provide more useful diagnostics for the user.
     if (!index.defined()) {
@@ -322,32 +331,32 @@ class TORCH_API Tensor: public TensorBase {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const {
-    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // TODO: The Python version also accepts arguments
   Tensor cuda() const {
-    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor hip() const {
-    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor ve() const {
-    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor vulkan() const {
-    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor metal() const {
-    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor meta() const {
-    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -389,7 +398,7 @@ class TORCH_API Tensor: public TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -424,7 +433,7 @@ class TORCH_API Tensor: public TensorBase {
   ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
   ///     It is an implementation detail on which the user should not rely.
   ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
-  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
+  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
     // currently does not support optional of TensorList our approach is to replace
@@ -509,7 +518,7 @@ class TORCH_API Tensor: public TensorBase {
 
   //example
   //Tensor * add(Tensor & b);
-  void __dispatch__backward(at::TensorList inputs, const c10::optional<at::Tensor> & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
+  void __dispatch__backward(at::TensorList inputs, const ::std::optional<at::Tensor> & gradient={}, ::std::optional<bool> retain_graph=::std::nullopt, bool create_graph=false) const;
   void __dispatch_set_data(const at::Tensor & new_data) const;
   at::Tensor __dispatch_data() const;
   bool __dispatch_is_leaf() const;
@@ -519,8 +528,8 @@ class TORCH_API Tensor: public TensorBase {
   void __dispatch_retain_grad() const;
   bool __dispatch_retains_grad() const;
   at::Tensor _fw_primal(int64_t level) const;
-  at::Tensor & rename_(c10::optional<at::DimnameList> names) const;
-  at::Tensor rename(c10::optional<at::DimnameList> names) const;
+  at::Tensor & rename_(::std::optional<at::DimnameList> names) const;
+  at::Tensor rename(::std::optional<at::DimnameList> names) const;
   at::Tensor align_to(at::DimnameList names) const;
   at::Tensor align_to(at::DimnameList order, int64_t ellipsis_idx) const;
   at::Tensor align_as(const at::Tensor & other) const;
@@ -532,7 +541,7 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor angle() const;
   at::Tensor sgn() const;
   at::Tensor & sgn_() const;
-  at::Tensor chalf(c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  at::Tensor chalf(::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
   at::Tensor _conj() const;
   at::Tensor __dispatch_conj() const;
   at::Tensor _conj_physical() const;
@@ -553,13 +562,17 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & addmv_(const at::Tensor & mat, const at::Tensor & vec, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
   at::Tensor addr(const at::Tensor & vec1, const at::Tensor & vec2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
   at::Tensor & addr_(const at::Tensor & vec1, const at::Tensor & vec2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
+  at::Tensor _is_all_true() const;
+  at::Tensor _is_any_true() const;
   at::Tensor all(int64_t dim, bool keepdim=false) const;
+  at::Tensor all(at::OptionalIntArrayRef dim, bool keepdim=false) const;
   at::Tensor all(at::Dimname dim, bool keepdim=false) const;
   bool allclose(const at::Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   at::Tensor any(int64_t dim, bool keepdim=false) const;
+  at::Tensor any(at::OptionalIntArrayRef dim, bool keepdim=false) const;
   at::Tensor any(at::Dimname dim, bool keepdim=false) const;
-  at::Tensor argmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
-  at::Tensor argmin(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
+  at::Tensor argmax(::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false) const;
+  at::Tensor argmin(::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false) const;
   at::Tensor acosh() const;
   at::Tensor & acosh_() const;
   at::Tensor arccosh() const;
@@ -572,10 +585,10 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & atanh_() const;
   at::Tensor arctanh() const;
   at::Tensor & arctanh_() const;
-  at::Tensor as_strided(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
-  at::Tensor as_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset=c10::nullopt) const;
-  const at::Tensor & as_strided_(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
-  const at::Tensor & as_strided__symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset=c10::nullopt) const;
+  at::Tensor as_strided(at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<int64_t> storage_offset=::std::nullopt) const;
+  at::Tensor as_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<c10::SymInt> storage_offset=::std::nullopt) const;
+  const at::Tensor & as_strided_(at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<int64_t> storage_offset=::std::nullopt) const;
+  const at::Tensor & as_strided__symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<c10::SymInt> storage_offset=::std::nullopt) const;
   at::Tensor asin() const;
   at::Tensor & asin_() const;
   at::Tensor arcsin() const;
@@ -586,17 +599,18 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & arctan_() const;
   at::Tensor baddbmm(const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
   at::Tensor & baddbmm_(const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
-  at::Tensor bernoulli(c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & bernoulli_(const at::Tensor & p, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & bernoulli_(double p=0.5, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor bernoulli(double p, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor bincount(const c10::optional<at::Tensor> & weights={}, int64_t minlength=0) const;
+  at::Tensor bernoulli(::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & bernoulli_(const at::Tensor & p, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & bernoulli_(double p=0.5, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor bernoulli(double p, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor bincount(const ::std::optional<at::Tensor> & weights={}, int64_t minlength=0) const;
   at::Tensor bitwise_not() const;
   at::Tensor & bitwise_not_() const;
   at::Tensor copysign(const at::Tensor & other) const;
   at::Tensor & copysign_(const at::Tensor & other) const;
   at::Tensor copysign(const at::Scalar & other) const;
   at::Tensor & copysign_(const at::Scalar & other) const;
+  at::Tensor _lazy_clone() const;
   at::Tensor logical_not() const;
   at::Tensor & logical_not_() const;
   at::Tensor logical_xor(const at::Tensor & other) const;
@@ -607,17 +621,20 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & logical_or_(const at::Tensor & other) const;
   at::Tensor bmm(const at::Tensor & mat2) const;
   at::Tensor broadcast_to(at::IntArrayRef size) const;
+  at::Tensor broadcast_to_symint(c10::SymIntArrayRef size) const;
   at::Tensor ceil() const;
   at::Tensor & ceil_() const;
   ::std::vector<at::Tensor> unsafe_chunk(int64_t chunks, int64_t dim=0) const;
   ::std::vector<at::Tensor> chunk(int64_t chunks, int64_t dim=0) const;
   ::std::vector<at::Tensor> tensor_split(int64_t sections, int64_t dim=0) const;
+  ::std::vector<at::Tensor> tensor_split_symint(c10::SymInt sections, int64_t dim=0) const;
   ::std::vector<at::Tensor> tensor_split(at::IntArrayRef indices, int64_t dim=0) const;
+  ::std::vector<at::Tensor> tensor_split_symint(c10::SymIntArrayRef indices, int64_t dim=0) const;
   ::std::vector<at::Tensor> tensor_split(const at::Tensor & tensor_indices_or_sections, int64_t dim=0) const;
-  at::Tensor clamp(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max=c10::nullopt) const;
-  at::Tensor clamp(const c10::optional<at::Tensor> & min={}, const c10::optional<at::Tensor> & max={}) const;
-  at::Tensor & clamp_(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max=c10::nullopt) const;
-  at::Tensor & clamp_(const c10::optional<at::Tensor> & min={}, const c10::optional<at::Tensor> & max={}) const;
+  at::Tensor clamp(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max=::std::nullopt) const;
+  at::Tensor clamp(const ::std::optional<at::Tensor> & min={}, const ::std::optional<at::Tensor> & max={}) const;
+  at::Tensor & clamp_(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max=::std::nullopt) const;
+  at::Tensor & clamp_(const ::std::optional<at::Tensor> & min={}, const ::std::optional<at::Tensor> & max={}) const;
   at::Tensor clamp_max(const at::Scalar & max) const;
   at::Tensor clamp_max(const at::Tensor & max) const;
   at::Tensor & clamp_max_(const at::Scalar & max) const;
@@ -626,54 +643,54 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor clamp_min(const at::Tensor & min) const;
   at::Tensor & clamp_min_(const at::Scalar & min) const;
   at::Tensor & clamp_min_(const at::Tensor & min) const;
-  at::Tensor clip(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max=c10::nullopt) const;
-  at::Tensor clip(const c10::optional<at::Tensor> & min={}, const c10::optional<at::Tensor> & max={}) const;
-  at::Tensor & clip_(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max=c10::nullopt) const;
-  at::Tensor & clip_(const c10::optional<at::Tensor> & min={}, const c10::optional<at::Tensor> & max={}) const;
-  at::Tensor __dispatch_contiguous(at::MemoryFormat memory_format=MemoryFormat::Contiguous) const;
+  at::Tensor clip(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max=::std::nullopt) const;
+  at::Tensor clip(const ::std::optional<at::Tensor> & min={}, const ::std::optional<at::Tensor> & max={}) const;
+  at::Tensor & clip_(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max=::std::nullopt) const;
+  at::Tensor & clip_(const ::std::optional<at::Tensor> & min={}, const ::std::optional<at::Tensor> & max={}) const;
+  at::Tensor __dispatch_contiguous(at::MemoryFormat memory_format=c10::MemoryFormat::Contiguous) const;
   at::Tensor & copy_(const at::Tensor & src, bool non_blocking=false) const;
   at::Tensor cos() const;
   at::Tensor & cos_() const;
   at::Tensor cosh() const;
   at::Tensor & cosh_() const;
   at::Tensor count_nonzero(at::IntArrayRef dim) const;
-  at::Tensor count_nonzero(c10::optional<int64_t> dim=c10::nullopt) const;
-  at::Tensor cov(int64_t correction=1, const c10::optional<at::Tensor> & fweights={}, const c10::optional<at::Tensor> & aweights={}) const;
+  at::Tensor count_nonzero(::std::optional<int64_t> dim=::std::nullopt) const;
+  at::Tensor cov(int64_t correction=1, const ::std::optional<at::Tensor> & fweights={}, const ::std::optional<at::Tensor> & aweights={}) const;
   at::Tensor corrcoef() const;
   ::std::tuple<at::Tensor,at::Tensor> cummax(int64_t dim) const;
   ::std::tuple<at::Tensor,at::Tensor> cummax(at::Dimname dim) const;
   ::std::tuple<at::Tensor,at::Tensor> cummin(int64_t dim) const;
   ::std::tuple<at::Tensor,at::Tensor> cummin(at::Dimname dim) const;
-  at::Tensor cumprod(int64_t dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor & cumprod_(int64_t dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor cumprod(at::Dimname dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor & cumprod_(at::Dimname dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor cumsum(int64_t dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor & cumsum_(int64_t dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor cumsum(at::Dimname dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor & cumsum_(at::Dimname dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor cumprod(int64_t dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor & cumprod_(int64_t dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor cumprod(at::Dimname dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor & cumprod_(at::Dimname dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor cumsum(int64_t dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor & cumsum_(int64_t dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor cumsum(at::Dimname dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor & cumsum_(at::Dimname dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   at::Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   at::Tensor diagflat(int64_t offset=0) const;
   at::Tensor diagonal(int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
   at::Tensor diagonal(at::Dimname outdim, at::Dimname dim1, at::Dimname dim2, int64_t offset=0) const;
   at::Tensor & fill_diagonal_(const at::Scalar & fill_value, bool wrap=false) const;
-  at::Tensor diff(int64_t n=1, int64_t dim=-1, const c10::optional<at::Tensor> & prepend={}, const c10::optional<at::Tensor> & append={}) const;
+  at::Tensor diff(int64_t n=1, int64_t dim=-1, const ::std::optional<at::Tensor> & prepend={}, const ::std::optional<at::Tensor> & append={}) const;
   at::Tensor div(const at::Tensor & other) const;
   at::Tensor & div_(const at::Tensor & other) const;
-  at::Tensor div(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const;
-  at::Tensor & div_(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const;
+  at::Tensor div(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const;
+  at::Tensor & div_(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const;
   at::Tensor div(const at::Scalar & other) const;
   at::Tensor & div_(const at::Scalar & other) const;
-  at::Tensor div(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const;
-  at::Tensor & div_(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const;
+  at::Tensor div(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const;
+  at::Tensor & div_(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const;
   at::Tensor divide(const at::Tensor & other) const;
   at::Tensor & divide_(const at::Tensor & other) const;
   at::Tensor divide(const at::Scalar & other) const;
   at::Tensor & divide_(const at::Scalar & other) const;
-  at::Tensor divide(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const;
-  at::Tensor & divide_(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const;
-  at::Tensor divide(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const;
-  at::Tensor & divide_(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const;
+  at::Tensor divide(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const;
+  at::Tensor & divide_(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const;
+  at::Tensor divide(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const;
+  at::Tensor & divide_(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const;
   at::Tensor true_divide(const at::Tensor & other) const;
   at::Tensor & true_divide_(const at::Tensor & other) const;
   at::Tensor true_divide(const at::Scalar & other) const;
@@ -681,27 +698,27 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor dot(const at::Tensor & tensor) const;
   at::Tensor vdot(const at::Tensor & other) const;
   at::Tensor new_empty(at::IntArrayRef size, at::TensorOptions options={}) const;
-  at::Tensor new_empty(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_empty(at::IntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_empty_symint(c10::SymIntArrayRef size, at::TensorOptions options={}) const;
-  at::Tensor new_empty_symint(c10::SymIntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_empty_symint(c10::SymIntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_empty_strided(at::IntArrayRef size, at::IntArrayRef stride, at::TensorOptions options={}) const;
-  at::Tensor new_empty_strided(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_empty_strided(at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_empty_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, at::TensorOptions options={}) const;
-  at::Tensor new_empty_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_empty_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_full(at::IntArrayRef size, const at::Scalar & fill_value, at::TensorOptions options={}) const;
-  at::Tensor new_full(at::IntArrayRef size, const at::Scalar & fill_value, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_full(at::IntArrayRef size, const at::Scalar & fill_value, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_full_symint(c10::SymIntArrayRef size, const at::Scalar & fill_value, at::TensorOptions options={}) const;
-  at::Tensor new_full_symint(c10::SymIntArrayRef size, const at::Scalar & fill_value, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_full_symint(c10::SymIntArrayRef size, const at::Scalar & fill_value, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_zeros(at::IntArrayRef size, at::TensorOptions options={}) const;
-  at::Tensor new_zeros(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_zeros(at::IntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_zeros_symint(c10::SymIntArrayRef size, at::TensorOptions options={}) const;
-  at::Tensor new_zeros_symint(c10::SymIntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_zeros_symint(c10::SymIntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_ones(at::IntArrayRef size, at::TensorOptions options={}) const;
-  at::Tensor new_ones(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
+  at::Tensor new_ones(at::IntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
   at::Tensor new_ones_symint(c10::SymIntArrayRef size, at::TensorOptions options={}) const;
-  at::Tensor new_ones_symint(c10::SymIntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const;
-  const at::Tensor & resize_(at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
-  const at::Tensor & resize__symint(c10::SymIntArrayRef size, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  at::Tensor new_ones_symint(c10::SymIntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const;
+  const at::Tensor & resize_(at::IntArrayRef size, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
+  const at::Tensor & resize__symint(c10::SymIntArrayRef size, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
   at::Tensor erf() const;
   at::Tensor & erf_() const;
   at::Tensor erfc() const;
@@ -720,7 +737,9 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor flatten(at::Dimname start_dim, at::Dimname end_dim, at::Dimname out_dim) const;
   at::Tensor flatten(at::DimnameList dims, at::Dimname out_dim) const;
   at::Tensor unflatten(int64_t dim, at::IntArrayRef sizes) const;
+  at::Tensor unflatten_symint(int64_t dim, c10::SymIntArrayRef sizes) const;
   at::Tensor unflatten(at::Dimname dim, at::IntArrayRef sizes, at::DimnameList names) const;
+  at::Tensor unflatten_symint(at::Dimname dim, c10::SymIntArrayRef sizes, at::DimnameList names) const;
   at::Tensor & fill_(const at::Scalar & value) const;
   at::Tensor & fill_(const at::Tensor & value) const;
   at::Tensor floor() const;
@@ -735,13 +754,13 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & gcd_(const at::Tensor & other) const;
   at::Tensor lcm(const at::Tensor & other) const;
   at::Tensor & lcm_(const at::Tensor & other) const;
-  at::Tensor index(const c10::List<c10::optional<at::Tensor>> & indices) const;
+  at::Tensor index(const c10::List<::std::optional<at::Tensor>> & indices) const;
   at::Tensor & index_copy_(int64_t dim, const at::Tensor & index, const at::Tensor & source) const;
   at::Tensor index_copy(int64_t dim, const at::Tensor & index, const at::Tensor & source) const;
   at::Tensor & index_copy_(at::Dimname dim, const at::Tensor & index, const at::Tensor & source) const;
   at::Tensor index_copy(at::Dimname dim, const at::Tensor & index, const at::Tensor & source) const;
-  at::Tensor & index_put_(const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate=false) const;
-  at::Tensor index_put(const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate=false) const;
+  at::Tensor & index_put_(const c10::List<::std::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate=false) const;
+  at::Tensor index_put(const c10::List<::std::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate=false) const;
   at::Tensor isclose(const at::Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   at::Tensor isnan() const;
   bool is_distributed() const;
@@ -758,8 +777,8 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor kron(const at::Tensor & other) const;
   ::std::tuple<at::Tensor,at::Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
   ::std::tuple<at::Tensor,at::Tensor> kthvalue(int64_t k, at::Dimname dim, bool keepdim=false) const;
-  at::Tensor nan_to_num(c10::optional<double> nan=c10::nullopt, c10::optional<double> posinf=c10::nullopt, c10::optional<double> neginf=c10::nullopt) const;
-  at::Tensor & nan_to_num_(c10::optional<double> nan=c10::nullopt, c10::optional<double> posinf=c10::nullopt, c10::optional<double> neginf=c10::nullopt) const;
+  at::Tensor nan_to_num(::std::optional<double> nan=::std::nullopt, ::std::optional<double> posinf=::std::nullopt, ::std::optional<double> neginf=::std::nullopt) const;
+  at::Tensor & nan_to_num_(::std::optional<double> nan=::std::nullopt, ::std::optional<double> posinf=::std::nullopt, ::std::optional<double> neginf=::std::nullopt) const;
   at::Tensor ldexp(const at::Tensor & other) const;
   at::Tensor & ldexp_(const at::Tensor & other) const;
   at::Tensor log() const;
@@ -776,8 +795,8 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor xlogy(const at::Scalar & other) const;
   at::Tensor & xlogy_(const at::Tensor & other) const;
   at::Tensor & xlogy_(const at::Scalar & other) const;
-  at::Tensor log_softmax(int64_t dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor log_softmax(at::Dimname dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor log_softmax(int64_t dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor log_softmax(at::Dimname dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   at::Tensor logcumsumexp(int64_t dim) const;
   at::Tensor logcumsumexp(at::Dimname dim) const;
   at::Tensor logsumexp(at::IntArrayRef dim, bool keepdim=false) const;
@@ -785,14 +804,14 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor matmul(const at::Tensor & other) const;
   at::Tensor matrix_power(int64_t n) const;
   at::Tensor matrix_exp() const;
-  ::std::tuple<at::Tensor,at::Tensor> aminmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
+  ::std::tuple<at::Tensor,at::Tensor> aminmax(::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false) const;
   ::std::tuple<at::Tensor,at::Tensor> max(int64_t dim, bool keepdim=false) const;
   ::std::tuple<at::Tensor,at::Tensor> max(at::Dimname dim, bool keepdim=false) const;
   at::Tensor amax(at::IntArrayRef dim={}, bool keepdim=false) const;
-  at::Tensor mean(c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor mean(at::OptionalIntArrayRef dim, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor mean(at::DimnameList dim, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor nanmean(at::OptionalIntArrayRef dim=c10::nullopt, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor mean(::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor mean(at::OptionalIntArrayRef dim, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor mean(at::DimnameList dim, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor nanmean(at::OptionalIntArrayRef dim=::std::nullopt, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   at::Tensor median() const;
   ::std::tuple<at::Tensor,at::Tensor> median(int64_t dim, bool keepdim=false) const;
   ::std::tuple<at::Tensor,at::Tensor> median(at::Dimname dim, bool keepdim=false) const;
@@ -819,7 +838,9 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   at::Tensor narrow_copy_symint(int64_t dim, c10::SymInt start, c10::SymInt length) const;
   at::Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
+  at::Tensor narrow_symint(int64_t dim, c10::SymInt start, c10::SymInt length) const;
   at::Tensor narrow(int64_t dim, const at::Tensor & start, int64_t length) const;
+  at::Tensor narrow_symint(int64_t dim, const at::Tensor & start, c10::SymInt length) const;
   at::Tensor permute(at::IntArrayRef dims) const;
   at::Tensor movedim(at::IntArrayRef source, at::IntArrayRef destination) const;
   at::Tensor movedim(int64_t source, int64_t destination) const;
@@ -830,8 +851,8 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor mT() const;
   at::Tensor mH() const;
   at::Tensor adjoint() const;
-  bool is_pinned(c10::optional<at::Device> device=c10::nullopt) const;
-  at::Tensor pin_memory(c10::optional<at::Device> device=c10::nullopt) const;
+  bool is_pinned(::std::optional<at::Device> device=::std::nullopt) const;
+  at::Tensor pin_memory(::std::optional<at::Device> device=::std::nullopt) const;
   at::Tensor pinverse(double rcond=1e-15) const;
   at::Tensor rad2deg() const;
   at::Tensor & rad2deg_() const;
@@ -846,8 +867,10 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & negative_() const;
   at::Tensor repeat(at::IntArrayRef repeats) const;
   at::Tensor repeat_symint(c10::SymIntArrayRef repeats) const;
-  at::Tensor repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt) const;
-  at::Tensor repeat_interleave(int64_t repeats, c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt) const;
+  at::Tensor repeat_interleave(const at::Tensor & repeats, ::std::optional<int64_t> dim=::std::nullopt, ::std::optional<int64_t> output_size=::std::nullopt) const;
+  at::Tensor repeat_interleave_symint(const at::Tensor & repeats, ::std::optional<int64_t> dim=::std::nullopt, ::std::optional<c10::SymInt> output_size=::std::nullopt) const;
+  at::Tensor repeat_interleave(int64_t repeats, ::std::optional<int64_t> dim=::std::nullopt, ::std::optional<int64_t> output_size=::std::nullopt) const;
+  at::Tensor repeat_interleave_symint(c10::SymInt repeats, ::std::optional<int64_t> dim=::std::nullopt, ::std::optional<c10::SymInt> output_size=::std::nullopt) const;
   at::Tensor reshape(at::IntArrayRef shape) const;
   at::Tensor reshape_symint(c10::SymIntArrayRef shape) const;
   at::Tensor _reshape_alias(at::IntArrayRef size, at::IntArrayRef stride) const;
@@ -860,17 +883,17 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor relu() const;
   at::Tensor & relu_() const;
   at::Tensor prelu(const at::Tensor & weight) const;
-  ::std::tuple<at::Tensor,at::Tensor> prelu_backward(const at::Tensor & grad_output, const at::Tensor & weight) const;
   at::Tensor hardshrink(const at::Scalar & lambd=0.5) const;
   at::Tensor hardshrink_backward(const at::Tensor & grad_out, const at::Scalar & lambd) const;
   at::Tensor rsqrt() const;
   at::Tensor & rsqrt_() const;
   at::Tensor select(at::Dimname dim, int64_t index) const;
   at::Tensor select(int64_t dim, int64_t index) const;
+  at::Tensor select_symint(int64_t dim, c10::SymInt index) const;
   at::Tensor sigmoid() const;
   at::Tensor & sigmoid_() const;
-  at::Tensor logit(c10::optional<double> eps=c10::nullopt) const;
-  at::Tensor & logit_(c10::optional<double> eps=c10::nullopt) const;
+  at::Tensor logit(::std::optional<double> eps=::std::nullopt) const;
+  at::Tensor & logit_(::std::optional<double> eps=::std::nullopt) const;
   at::Tensor sin() const;
   at::Tensor & sin_() const;
   at::Tensor sinc() const;
@@ -880,22 +903,30 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor detach() const;
   at::Tensor & detach_() const;
   int64_t size(at::Dimname dim) const;
-  at::Tensor slice(int64_t dim=0, c10::optional<int64_t> start=c10::nullopt, c10::optional<int64_t> end=c10::nullopt, int64_t step=1) const;
-  at::Tensor slice_symint(int64_t dim=0, c10::optional<c10::SymInt> start=c10::nullopt, c10::optional<c10::SymInt> end=c10::nullopt, c10::SymInt step=1) const;
-  at::Tensor slice_scatter(const at::Tensor & src, int64_t dim=0, c10::optional<int64_t> start=c10::nullopt, c10::optional<int64_t> end=c10::nullopt, int64_t step=1) const;
-  at::Tensor slice_scatter_symint(const at::Tensor & src, int64_t dim=0, c10::optional<c10::SymInt> start=c10::nullopt, c10::optional<c10::SymInt> end=c10::nullopt, c10::SymInt step=1) const;
+  at::Tensor slice(int64_t dim=0, ::std::optional<int64_t> start=::std::nullopt, ::std::optional<int64_t> end=::std::nullopt, int64_t step=1) const;
+  at::Tensor slice_symint(int64_t dim=0, ::std::optional<c10::SymInt> start=::std::nullopt, ::std::optional<c10::SymInt> end=::std::nullopt, c10::SymInt step=1) const;
+  at::Tensor slice_inverse(const at::Tensor & src, int64_t dim=0, ::std::optional<int64_t> start=::std::nullopt, ::std::optional<int64_t> end=::std::nullopt, int64_t step=1) const;
+  at::Tensor slice_inverse_symint(const at::Tensor & src, int64_t dim=0, ::std::optional<c10::SymInt> start=::std::nullopt, ::std::optional<c10::SymInt> end=::std::nullopt, c10::SymInt step=1) const;
+  at::Tensor slice_scatter(const at::Tensor & src, int64_t dim=0, ::std::optional<int64_t> start=::std::nullopt, ::std::optional<int64_t> end=::std::nullopt, int64_t step=1) const;
+  at::Tensor slice_scatter_symint(const at::Tensor & src, int64_t dim=0, ::std::optional<c10::SymInt> start=::std::nullopt, ::std::optional<c10::SymInt> end=::std::nullopt, c10::SymInt step=1) const;
   at::Tensor select_scatter(const at::Tensor & src, int64_t dim, int64_t index) const;
+  at::Tensor select_scatter_symint(const at::Tensor & src, int64_t dim, c10::SymInt index) const;
   at::Tensor diagonal_scatter(const at::Tensor & src, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
-  at::Tensor as_strided_scatter(const at::Tensor & src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
-  at::Tensor as_strided_scatter_symint(const at::Tensor & src, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset=c10::nullopt) const;
+  at::Tensor as_strided_scatter(const at::Tensor & src, at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<int64_t> storage_offset=::std::nullopt) const;
+  at::Tensor as_strided_scatter_symint(const at::Tensor & src, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<c10::SymInt> storage_offset=::std::nullopt) const;
   at::Tensor smm(const at::Tensor & mat2) const;
-  at::Tensor softmax(int64_t dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor softmax(at::Dimname dim, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor softmax(int64_t dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor softmax(at::Dimname dim, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   ::std::vector<at::Tensor> unsafe_split(int64_t split_size, int64_t dim=0) const;
+  ::std::vector<at::Tensor> unsafe_split_symint(c10::SymInt split_size, int64_t dim=0) const;
   ::std::vector<at::Tensor> split(int64_t split_size, int64_t dim=0) const;
+  ::std::vector<at::Tensor> split_symint(c10::SymInt split_size, int64_t dim=0) const;
   ::std::vector<at::Tensor> split(at::IntArrayRef split_size, int64_t dim=0) const;
+  ::std::vector<at::Tensor> split_symint(c10::SymIntArrayRef split_size, int64_t dim=0) const;
   ::std::vector<at::Tensor> unsafe_split_with_sizes(at::IntArrayRef split_sizes, int64_t dim=0) const;
+  ::std::vector<at::Tensor> unsafe_split_with_sizes_symint(c10::SymIntArrayRef split_sizes, int64_t dim=0) const;
   ::std::vector<at::Tensor> split_with_sizes(at::IntArrayRef split_sizes, int64_t dim=0) const;
+  ::std::vector<at::Tensor> split_with_sizes_symint(c10::SymIntArrayRef split_sizes, int64_t dim=0) const;
   ::std::vector<at::Tensor> hsplit(int64_t sections) const;
   ::std::vector<at::Tensor> hsplit(at::IntArrayRef indices) const;
   ::std::vector<at::Tensor> vsplit(int64_t sections) const;
@@ -905,31 +936,34 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor squeeze() const;
   at::Tensor squeeze(int64_t dim) const;
   at::Tensor squeeze(at::Dimname dim) const;
+  at::Tensor squeeze(at::IntArrayRef dim) const;
   at::Tensor & squeeze_() const;
   at::Tensor & squeeze_(int64_t dim) const;
+  at::Tensor & squeeze_(at::IntArrayRef dim) const;
   at::Tensor & squeeze_(at::Dimname dim) const;
   at::Tensor sspaddmm(const at::Tensor & mat1, const at::Tensor & mat2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
-  at::Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const c10::optional<at::Tensor> & window, bool normalized, c10::optional<bool> onesided=c10::nullopt, c10::optional<bool> return_complex=c10::nullopt) const;
-  at::Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const c10::optional<at::Tensor> & window={}, bool center=true, c10::string_view pad_mode="reflect", bool normalized=false, c10::optional<bool> onesided=c10::nullopt, c10::optional<bool> return_complex=c10::nullopt) const;
-  at::Tensor istft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const c10::optional<at::Tensor> & window={}, bool center=true, bool normalized=false, c10::optional<bool> onesided=c10::nullopt, c10::optional<int64_t> length=c10::nullopt, bool return_complex=false) const;
+  at::Tensor stft(int64_t n_fft, ::std::optional<int64_t> hop_length, ::std::optional<int64_t> win_length, const ::std::optional<at::Tensor> & window, bool normalized, ::std::optional<bool> onesided=::std::nullopt, ::std::optional<bool> return_complex=::std::nullopt) const;
+  at::Tensor stft(int64_t n_fft, ::std::optional<int64_t> hop_length=::std::nullopt, ::std::optional<int64_t> win_length=::std::nullopt, const ::std::optional<at::Tensor> & window={}, bool center=true, c10::string_view pad_mode="reflect", bool normalized=false, ::std::optional<bool> onesided=::std::nullopt, ::std::optional<bool> return_complex=::std::nullopt) const;
+  at::Tensor istft(int64_t n_fft, ::std::optional<int64_t> hop_length=::std::nullopt, ::std::optional<int64_t> win_length=::std::nullopt, const ::std::optional<at::Tensor> & window={}, bool center=true, bool normalized=false, ::std::optional<bool> onesided=::std::nullopt, ::std::optional<int64_t> length=::std::nullopt, bool return_complex=false) const;
   int64_t stride(at::Dimname dim) const;
-  at::Tensor sum(c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor sum(at::OptionalIntArrayRef dim, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor sum(at::DimnameList dim, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor nansum(at::OptionalIntArrayRef dim=c10::nullopt, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor sum(::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor sum(at::OptionalIntArrayRef dim, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor sum(at::DimnameList dim, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor nansum(at::OptionalIntArrayRef dim=::std::nullopt, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   at::Tensor sum_to_size(at::IntArrayRef size) const;
+  at::Tensor sum_to_size_symint(c10::SymIntArrayRef size) const;
   at::Tensor sqrt() const;
   at::Tensor & sqrt_() const;
   at::Tensor square() const;
   at::Tensor & square_() const;
-  at::Tensor std(bool unbiased=true) const;
-  at::Tensor std(at::OptionalIntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
-  at::Tensor std(at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim=false) const;
-  at::Tensor std(at::DimnameList dim, bool unbiased=true, bool keepdim=false) const;
-  at::Tensor std(at::DimnameList dim, c10::optional<int64_t> correction, bool keepdim=false) const;
-  at::Tensor prod(c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor prod(int64_t dim, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor prod(at::Dimname dim, bool keepdim=false, c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor std(bool unbiased) const;
+  at::Tensor std(at::OptionalIntArrayRef dim, bool unbiased, bool keepdim=false) const;
+  at::Tensor std(at::OptionalIntArrayRef dim=::std::nullopt, const ::std::optional<at::Scalar> & correction=::std::nullopt, bool keepdim=false) const;
+  at::Tensor std(at::DimnameList dim, bool unbiased, bool keepdim=false) const;
+  at::Tensor std(at::DimnameList dim, const ::std::optional<at::Scalar> & correction=::std::nullopt, bool keepdim=false) const;
+  at::Tensor prod(::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor prod(int64_t dim, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
+  at::Tensor prod(at::Dimname dim, bool keepdim=false, ::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   at::Tensor t() const;
   at::Tensor & t_() const;
   at::Tensor tan() const;
@@ -937,6 +971,7 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor tanh() const;
   at::Tensor & tanh_() const;
   at::Tensor tile(at::IntArrayRef dims) const;
+  at::Tensor tile_symint(c10::SymIntArrayRef dims) const;
   at::Tensor transpose(int64_t dim0, int64_t dim1) const;
   at::Tensor transpose(at::Dimname dim0, at::Dimname dim1) const;
   at::Tensor & transpose_(int64_t dim0, int64_t dim1) const;
@@ -944,10 +979,11 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor fliplr() const;
   at::Tensor flipud() const;
   at::Tensor roll(at::IntArrayRef shifts, at::IntArrayRef dims={}) const;
+  at::Tensor roll_symint(c10::SymIntArrayRef shifts, at::IntArrayRef dims={}) const;
   at::Tensor rot90(int64_t k=1, at::IntArrayRef dims={0,1}) const;
   at::Tensor _nested_tensor_size() const;
   at::Tensor _nested_tensor_strides() const;
-  ::std::vector<int64_t> _nested_tensor_offsets() const;
+  at::Tensor _nested_tensor_storage_offsets() const;
   at::Tensor trunc() const;
   at::Tensor & trunc_() const;
   at::Tensor fix() const;
@@ -955,23 +991,24 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor type_as(const at::Tensor & other) const;
   at::Tensor unsqueeze(int64_t dim) const;
   at::Tensor & unsqueeze_(int64_t dim) const;
-  at::Tensor var(bool unbiased=true) const;
-  at::Tensor var(at::OptionalIntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
-  at::Tensor var(at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim=false) const;
-  at::Tensor var(at::DimnameList dim, bool unbiased=true, bool keepdim=false) const;
-  at::Tensor var(at::DimnameList dim, c10::optional<int64_t> correction, bool keepdim=false) const;
+  at::Tensor var(bool unbiased) const;
+  at::Tensor var(at::OptionalIntArrayRef dim, bool unbiased, bool keepdim=false) const;
+  at::Tensor var(at::OptionalIntArrayRef dim=::std::nullopt, const ::std::optional<at::Scalar> & correction=::std::nullopt, bool keepdim=false) const;
+  at::Tensor var(at::DimnameList dim, bool unbiased, bool keepdim=false) const;
+  at::Tensor var(at::DimnameList dim, const ::std::optional<at::Scalar> & correction=::std::nullopt, bool keepdim=false) const;
   at::Tensor view_as(const at::Tensor & other) const;
   at::Tensor where(const at::Tensor & condition, const at::Tensor & other) const;
-  at::Tensor norm(const c10::optional<at::Scalar> & p, at::ScalarType dtype) const;
+  at::Tensor where(const at::Tensor & condition, const at::Scalar & other) const;
+  at::Tensor norm(const ::std::optional<at::Scalar> & p, at::ScalarType dtype) const;
   at::Tensor norm(const at::Scalar & p=2) const;
-  at::Tensor norm(const c10::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim, at::ScalarType dtype) const;
-  at::Tensor norm(const c10::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim=false) const;
-  at::Tensor norm(const c10::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim, at::ScalarType dtype) const;
-  at::Tensor norm(const c10::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim=false) const;
+  at::Tensor norm(const ::std::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim, at::ScalarType dtype) const;
+  at::Tensor norm(const ::std::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim=false) const;
+  at::Tensor norm(const ::std::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim, at::ScalarType dtype) const;
+  at::Tensor norm(const ::std::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim=false) const;
   ::std::tuple<at::Tensor,at::Tensor> frexp() const;
-  at::Tensor clone(c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  at::Tensor clone(::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
   at::Tensor positive() const;
-  const at::Tensor & resize_as_(const at::Tensor & the_template, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  const at::Tensor & resize_as_(const at::Tensor & the_template, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
   const at::Tensor & resize_as_sparse_(const at::Tensor & the_template) const;
   at::Tensor & zero_() const;
   at::Tensor sub(const at::Tensor & other, const at::Scalar & alpha=1) const;
@@ -990,8 +1027,9 @@ class TORCH_API Tensor: public TensorBase {
   const at::Tensor & sparse_resize_(at::IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const;
   const at::Tensor & sparse_resize_and_clear_(at::IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const;
   at::Tensor sparse_mask(const at::Tensor & mask) const;
-  at::Tensor to_dense(c10::optional<at::ScalarType> dtype=c10::nullopt) const;
-  at::Tensor _to_dense(c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor _sparse_mask_projection(const at::Tensor & mask, bool accumulate_matches=false) const;
+  at::Tensor to_dense(::std::optional<at::ScalarType> dtype=::std::nullopt, ::std::optional<bool> masked_grad=::std::nullopt) const;
+  at::Tensor _to_dense(::std::optional<at::ScalarType> dtype=::std::nullopt, ::std::optional<bool> masked_grad=::std::nullopt) const;
   int64_t sparse_dim() const;
   int64_t _dimI() const;
   int64_t dense_dim() const;
@@ -1011,12 +1049,18 @@ class TORCH_API Tensor: public TensorBase {
   ::std::vector<at::Tensor> unbind(int64_t dim=0) const;
   ::std::vector<at::Tensor> unbind(at::Dimname dim) const;
   at::Tensor to_sparse(int64_t sparse_dim) const;
-  at::Tensor to_sparse() const;
-  at::Tensor to_sparse_csr() const;
-  at::Tensor to_sparse_csc() const;
-  at::Tensor to_sparse_bsr(at::IntArrayRef blocksize) const;
-  at::Tensor to_sparse_bsc(at::IntArrayRef blocksize) const;
-  at::Tensor to_mkldnn(c10::optional<at::ScalarType> dtype=c10::nullopt) const;
+  at::Tensor _to_sparse(int64_t sparse_dim) const;
+  at::Tensor to_sparse(::std::optional<at::Layout> layout=::std::nullopt, at::OptionalIntArrayRef blocksize=::std::nullopt, ::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor _to_sparse(::std::optional<at::Layout> layout=::std::nullopt, at::OptionalIntArrayRef blocksize=::std::nullopt, ::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor to_sparse_csr(::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor _to_sparse_csr(::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor to_sparse_csc(::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor _to_sparse_csc(::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor to_sparse_bsr(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor _to_sparse_bsr(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor to_sparse_bsc(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor _to_sparse_bsc(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim=::std::nullopt) const;
+  at::Tensor to_mkldnn(::std::optional<at::ScalarType> dtype=::std::nullopt) const;
   at::Tensor dequantize() const;
   double q_scale() const;
   int64_t q_zero_point() const;
@@ -1027,11 +1071,11 @@ class TORCH_API Tensor: public TensorBase {
   at::QScheme qscheme() const;
   at::Tensor _autocast_to_reduced_precision(bool cuda_enabled, bool cpu_enabled, at::ScalarType cuda_dtype, at::ScalarType cpu_dtype) const;
   at::Tensor _autocast_to_full_precision(bool cuda_enabled, bool cpu_enabled) const;
-  at::Tensor to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
-  at::Tensor to(c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) const;
-  at::Tensor to(at::Device device, at::ScalarType dtype, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
-  at::Tensor to(at::ScalarType dtype, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
-  at::Tensor to(const at::Tensor & other, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  at::Tensor to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
+  at::Tensor to(::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory, bool non_blocking, bool copy, ::std::optional<at::MemoryFormat> memory_format) const;
+  at::Tensor to(at::Device device, at::ScalarType dtype, bool non_blocking=false, bool copy=false, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
+  at::Tensor to(at::ScalarType dtype, bool non_blocking=false, bool copy=false, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
+  at::Tensor to(const at::Tensor & other, bool non_blocking=false, bool copy=false, ::std::optional<at::MemoryFormat> memory_format=::std::nullopt) const;
   at::Scalar item() const;
   at::Tensor & set_(at::Storage source) const;
   at::Tensor & set_(at::Storage source, int64_t storage_offset, at::IntArrayRef size, at::IntArrayRef stride={}) const;
@@ -1129,16 +1173,16 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & lerp_(const at::Tensor & end, const at::Tensor & weight) const;
   at::Tensor & addbmm_(const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
   at::Tensor addbmm(const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta=1, const at::Scalar & alpha=1) const;
-  at::Tensor & random_(int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & random_(int64_t to, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & random_(c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & uniform_(double from=0, double to=1, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & cauchy_(double median=0, double sigma=1, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & log_normal_(double mean=1, double std=2, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & exponential_(double lambd=1, c10::optional<at::Generator> generator=c10::nullopt) const;
-  at::Tensor & geometric_(double p, c10::optional<at::Generator> generator=c10::nullopt) const;
+  at::Tensor & random_(int64_t from, ::std::optional<int64_t> to, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & random_(int64_t to, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & random_(::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & uniform_(double from=0, double to=1, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & cauchy_(double median=0, double sigma=1, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & log_normal_(double mean=1, double std=2, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & exponential_(double lambd=1, ::std::optional<at::Generator> generator=::std::nullopt) const;
+  at::Tensor & geometric_(double p, ::std::optional<at::Generator> generator=::std::nullopt) const;
   at::Tensor diag(int64_t diagonal=0) const;
-  at::Tensor cross(const at::Tensor & other, c10::optional<int64_t> dim=c10::nullopt) const;
+  at::Tensor cross(const at::Tensor & other, ::std::optional<int64_t> dim=::std::nullopt) const;
   at::Tensor triu(int64_t diagonal=0) const;
   at::Tensor tril(int64_t diagonal=0) const;
   at::Tensor trace() const;
@@ -1185,11 +1229,12 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor & less_(const at::Scalar & other) const;
   at::Tensor & less_(const at::Tensor & other) const;
   at::Tensor take(const at::Tensor & index) const;
-  at::Tensor take_along_dim(const at::Tensor & indices, c10::optional<int64_t> dim=c10::nullopt) const;
+  at::Tensor take_along_dim(const at::Tensor & indices, ::std::optional<int64_t> dim=::std::nullopt) const;
   at::Tensor index_select(int64_t dim, const at::Tensor & index) const;
   at::Tensor index_select(at::Dimname dim, const at::Tensor & index) const;
   at::Tensor masked_select(const at::Tensor & mask) const;
   at::Tensor nonzero() const;
+  at::Tensor nonzero_static(int64_t size, int64_t fill_value=-1) const;
   ::std::vector<at::Tensor> nonzero_numpy() const;
   at::Tensor argwhere() const;
   at::Tensor gather(int64_t dim, const at::Tensor & index, bool sparse_grad=false) const;
@@ -1199,7 +1244,6 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor addcdiv(const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value=1) const;
   at::Tensor & addcdiv_(const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value=1) const;
   ::std::tuple<at::Tensor,at::Tensor> triangular_solve(const at::Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
-  ::std::tuple<at::Tensor,at::Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   ::std::tuple<at::Tensor,at::Tensor,at::Tensor> svd(bool some=true, bool compute_uv=true) const;
   at::Tensor swapaxes(int64_t axis0, int64_t axis1) const;
   at::Tensor & swapaxes_(int64_t axis0, int64_t axis1) const;
@@ -1213,7 +1257,7 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor orgqr(const at::Tensor & input2) const;
   at::Tensor ormqr(const at::Tensor & input2, const at::Tensor & input3, bool left=true, bool transpose=false) const;
   at::Tensor lu_solve(const at::Tensor & LU_data, const at::Tensor & LU_pivots) const;
-  at::Tensor multinomial(int64_t num_samples, bool replacement=false, c10::optional<at::Generator> generator=c10::nullopt) const;
+  at::Tensor multinomial(int64_t num_samples, bool replacement=false, ::std::optional<at::Generator> generator=::std::nullopt) const;
   at::Tensor & lgamma_() const;
   at::Tensor lgamma() const;
   at::Tensor digamma() const;
@@ -1234,8 +1278,8 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor lerp(const at::Tensor & end, const at::Scalar & weight) const;
   at::Tensor lerp(const at::Tensor & end, const at::Tensor & weight) const;
   at::Tensor histc(int64_t bins=100, const at::Scalar & min=0, const at::Scalar & max=0) const;
-  ::std::tuple<at::Tensor,at::Tensor> histogram(const at::Tensor & bins, const c10::optional<at::Tensor> & weight={}, bool density=false) const;
-  ::std::tuple<at::Tensor,at::Tensor> histogram(int64_t bins=100, c10::optional<at::ArrayRef<double>> range=c10::nullopt, const c10::optional<at::Tensor> & weight={}, bool density=false) const;
+  ::std::tuple<at::Tensor,at::Tensor> histogram(const at::Tensor & bins, const ::std::optional<at::Tensor> & weight={}, bool density=false) const;
+  ::std::tuple<at::Tensor,at::Tensor> histogram(int64_t bins=100, ::std::optional<at::ArrayRef<double>> range=::std::nullopt, const ::std::optional<at::Tensor> & weight={}, bool density=false) const;
   at::Tensor fmod(const at::Scalar & other) const;
   at::Tensor & fmod_(const at::Scalar & other) const;
   at::Tensor fmod(const at::Tensor & other) const;
@@ -1260,19 +1304,20 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor max(const at::Tensor & other) const;
   at::Tensor minimum(const at::Tensor & other) const;
   at::Tensor min(const at::Tensor & other) const;
-  at::Tensor quantile(const at::Tensor & q, c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
-  at::Tensor quantile(double q, c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
-  at::Tensor nanquantile(const at::Tensor & q, c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
-  at::Tensor nanquantile(double q, c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
+  at::Tensor quantile(const at::Tensor & q, ::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
+  at::Tensor quantile(double q, ::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
+  at::Tensor nanquantile(const at::Tensor & q, ::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
+  at::Tensor nanquantile(double q, ::std::optional<int64_t> dim=::std::nullopt, bool keepdim=false, c10::string_view interpolation="linear") const;
   ::std::tuple<at::Tensor,at::Tensor> sort(int64_t dim=-1, bool descending=false) const;
-  ::std::tuple<at::Tensor,at::Tensor> sort(c10::optional<bool> stable, int64_t dim=-1, bool descending=false) const;
+  ::std::tuple<at::Tensor,at::Tensor> sort(::std::optional<bool> stable, int64_t dim=-1, bool descending=false) const;
   ::std::tuple<at::Tensor,at::Tensor> sort(at::Dimname dim, bool descending=false) const;
-  ::std::tuple<at::Tensor,at::Tensor> sort(c10::optional<bool> stable, at::Dimname dim, bool descending=false) const;
+  ::std::tuple<at::Tensor,at::Tensor> sort(::std::optional<bool> stable, at::Dimname dim, bool descending=false) const;
   at::Tensor msort() const;
   at::Tensor argsort(int64_t dim=-1, bool descending=false) const;
   at::Tensor argsort(bool stable, int64_t dim=-1, bool descending=false) const;
   at::Tensor argsort(at::Dimname dim, bool descending=false) const;
   ::std::tuple<at::Tensor,at::Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
+  ::std::tuple<at::Tensor,at::Tensor> topk_symint(c10::SymInt k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
   at::Tensor all() const;
   at::Tensor any() const;
   at::Tensor renorm(const at::Scalar & p, int64_t dim, const at::Scalar & maxnorm) const;
@@ -1287,7 +1332,7 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor float_power(const at::Scalar & exponent) const;
   at::Tensor & float_power_(const at::Scalar & exponent) const;
   at::Tensor & float_power_(const at::Tensor & exponent) const;
-  at::Tensor & normal_(double mean=0, double std=1, c10::optional<at::Generator> generator=c10::nullopt) const;
+  at::Tensor & normal_(double mean=0, double std=1, ::std::optional<at::Generator> generator=::std::nullopt) const;
   at::Tensor alias() const;
   at::Tensor isfinite() const;
   at::Tensor isinf() const;
@@ -1301,8 +1346,8 @@ class TORCH_API Tensor: public TensorBase {
   at::Tensor inner(const at::Tensor & other) const;
   at::Tensor outer(const at::Tensor & vec2) const;
   at::Tensor ger(const at::Tensor & vec2) const;
-  at::Tensor to_padded_tensor(double padding, at::OptionalIntArrayRef output_size=c10::nullopt) const;
-  at::Tensor _nested_tensor_layer_norm(const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, double eps) const;
+  at::Tensor to_padded_tensor(double padding, at::OptionalIntArrayRef output_size=::std::nullopt) const;
+  at::Tensor to_padded_tensor_symint(double padding, at::OptionalSymIntArrayRef output_size=::std::nullopt) const;
 
   // Special C++ only overloads for std()-like functions (See gh-40287)
   // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
@@ -1364,9 +1409,9 @@ class TORCH_API Tensor: public TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, Tensor>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -1410,7 +1455,7 @@ class TORCH_API Tensor: public TensorBase {
     return TensorBase::data();
   }
 
-  void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
+  void _backward(TensorList inputs, const std::optional<Tensor>& gradient, std::optional<bool> keep_graph, bool create_graph) const;
 
   const Tensor& requires_grad_(bool _requires_grad=true) const {
     TensorBase::requires_grad_(_requires_grad);
@@ -1435,7 +1480,7 @@ Tensor make_tensor(Args&&... args) {
 namespace at {
 
 // aten::_backward(Tensor self, Tensor[] inputs, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
-inline void Tensor::__dispatch__backward(at::TensorList inputs, const c10::optional<at::Tensor> & gradient, c10::optional<bool> retain_graph, bool create_graph) const {
+inline void Tensor::__dispatch__backward(at::TensorList inputs, const ::std::optional<at::Tensor> & gradient, ::std::optional<bool> retain_graph, bool create_graph) const {
     return at::_ops::_backward::call(const_cast<Tensor&>(*this), inputs, gradient, retain_graph, create_graph);
 }
 
@@ -1485,12 +1530,12 @@ inline at::Tensor Tensor::_fw_primal(int64_t level) const {
 }
 
 // aten::rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
-inline at::Tensor & Tensor::rename_(c10::optional<at::DimnameList> names) const {
+inline at::Tensor & Tensor::rename_(::std::optional<at::DimnameList> names) const {
     return at::_ops::rename_::call(const_cast<Tensor&>(*this), names);
 }
 
 // aten::rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)
-inline at::Tensor Tensor::rename(c10::optional<at::DimnameList> names) const {
+inline at::Tensor Tensor::rename(::std::optional<at::DimnameList> names) const {
     return at::_ops::rename::call(const_cast<Tensor&>(*this), names);
 }
 
@@ -1550,7 +1595,7 @@ inline at::Tensor & Tensor::sgn_() const {
 }
 
 // aten::chalf(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
-inline at::Tensor Tensor::chalf(c10::optional<at::MemoryFormat> memory_format) const {
+inline at::Tensor Tensor::chalf(::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::chalf::call(const_cast<Tensor&>(*this), memory_format);
 }
 
@@ -1654,9 +1699,24 @@ inline at::Tensor & Tensor::addr_(const at::Tensor & vec1, const at::Tensor & ve
     return at::_ops::addr_::call(const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
 }
 
+// aten::_is_all_true(Tensor self) -> Tensor
+inline at::Tensor Tensor::_is_all_true() const {
+    return at::_ops::_is_all_true::call(const_cast<Tensor&>(*this));
+}
+
+// aten::_is_any_true(Tensor self) -> Tensor
+inline at::Tensor Tensor::_is_any_true() const {
+    return at::_ops::_is_any_true::call(const_cast<Tensor&>(*this));
+}
+
 // aten::all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
 inline at::Tensor Tensor::all(int64_t dim, bool keepdim) const {
     return at::_ops::all_dim::call(const_cast<Tensor&>(*this), dim, keepdim);
+}
+
+// aten::all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+inline at::Tensor Tensor::all(at::OptionalIntArrayRef dim, bool keepdim) const {
+    return at::_ops::all_dims::call(const_cast<Tensor&>(*this), dim, keepdim);
 }
 
 // aten::all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
@@ -1674,18 +1734,23 @@ inline at::Tensor Tensor::any(int64_t dim, bool keepdim) const {
     return at::_ops::any_dim::call(const_cast<Tensor&>(*this), dim, keepdim);
 }
 
+// aten::any.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+inline at::Tensor Tensor::any(at::OptionalIntArrayRef dim, bool keepdim) const {
+    return at::_ops::any_dims::call(const_cast<Tensor&>(*this), dim, keepdim);
+}
+
 // aten::any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
 inline at::Tensor Tensor::any(at::Dimname dim, bool keepdim) const {
     return at::_ops::any_dimname::call(const_cast<Tensor&>(*this), dim, keepdim);
 }
 
 // aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::argmax(c10::optional<int64_t> dim, bool keepdim) const {
+inline at::Tensor Tensor::argmax(::std::optional<int64_t> dim, bool keepdim) const {
     return at::_ops::argmax::call(const_cast<Tensor&>(*this), dim, keepdim);
 }
 
 // aten::argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
+inline at::Tensor Tensor::argmin(::std::optional<int64_t> dim, bool keepdim) const {
     return at::_ops::argmin::call(const_cast<Tensor&>(*this), dim, keepdim);
 }
 
@@ -1750,22 +1815,22 @@ inline at::Tensor & Tensor::arctanh_() const {
 }
 
 // aten::as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
-inline at::Tensor Tensor::as_strided(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
-    return at::_ops::as_strided::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), storage_offset.has_value() ? c10::make_optional(c10::SymInt(*storage_offset)) : c10::nullopt);
+inline at::Tensor Tensor::as_strided(at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<int64_t> storage_offset) const {
+    return at::_ops::as_strided::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), storage_offset.has_value() ? ::std::make_optional(c10::SymInt(*storage_offset)) : ::std::nullopt);
 }
 
 // aten::as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
-inline at::Tensor Tensor::as_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) const {
+inline at::Tensor Tensor::as_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<c10::SymInt> storage_offset) const {
     return at::_ops::as_strided::call(const_cast<Tensor&>(*this), size, stride, storage_offset);
 }
 
 // aten::as_strided_(Tensor(a!) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a!)
-inline const at::Tensor & Tensor::as_strided_(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
-    return at::_ops::as_strided_::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), storage_offset.has_value() ? c10::make_optional(c10::SymInt(*storage_offset)) : c10::nullopt);
+inline const at::Tensor & Tensor::as_strided_(at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<int64_t> storage_offset) const {
+    return at::_ops::as_strided_::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), storage_offset.has_value() ? ::std::make_optional(c10::SymInt(*storage_offset)) : ::std::nullopt);
 }
 
 // aten::as_strided_(Tensor(a!) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a!)
-inline const at::Tensor & Tensor::as_strided__symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) const {
+inline const at::Tensor & Tensor::as_strided__symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<c10::SymInt> storage_offset) const {
     return at::_ops::as_strided_::call(const_cast<Tensor&>(*this), size, stride, storage_offset);
 }
 
@@ -1820,27 +1885,27 @@ inline at::Tensor & Tensor::baddbmm_(const at::Tensor & batch1, const at::Tensor
 }
 
 // aten::bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
-inline at::Tensor Tensor::bernoulli(c10::optional<at::Generator> generator) const {
+inline at::Tensor Tensor::bernoulli(::std::optional<at::Generator> generator) const {
     return at::_ops::bernoulli::call(const_cast<Tensor&>(*this), generator);
 }
 
 // aten::bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::bernoulli_(const at::Tensor & p, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::bernoulli_(const at::Tensor & p, ::std::optional<at::Generator> generator) const {
     return at::_ops::bernoulli__Tensor::call(const_cast<Tensor&>(*this), p, generator);
 }
 
 // aten::bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::bernoulli_(double p, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::bernoulli_(double p, ::std::optional<at::Generator> generator) const {
     return at::_ops::bernoulli__float::call(const_cast<Tensor&>(*this), p, generator);
 }
 
 // aten::bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
-inline at::Tensor Tensor::bernoulli(double p, c10::optional<at::Generator> generator) const {
+inline at::Tensor Tensor::bernoulli(double p, ::std::optional<at::Generator> generator) const {
     return at::_ops::bernoulli_p::call(const_cast<Tensor&>(*this), p, generator);
 }
 
 // aten::bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor
-inline at::Tensor Tensor::bincount(const c10::optional<at::Tensor> & weights, int64_t minlength) const {
+inline at::Tensor Tensor::bincount(const ::std::optional<at::Tensor> & weights, int64_t minlength) const {
     return at::_ops::bincount::call(const_cast<Tensor&>(*this), weights, minlength);
 }
 
@@ -1872,6 +1937,11 @@ inline at::Tensor Tensor::copysign(const at::Scalar & other) const {
 // aten::copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
 inline at::Tensor & Tensor::copysign_(const at::Scalar & other) const {
     return at::_ops::copysign__Scalar::call(const_cast<Tensor&>(*this), other);
+}
+
+// aten::_lazy_clone(Tensor self) -> Tensor
+inline at::Tensor Tensor::_lazy_clone() const {
+    return at::_ops::_lazy_clone::call(const_cast<Tensor&>(*this));
 }
 
 // aten::logical_not(Tensor self) -> Tensor
@@ -1919,8 +1989,13 @@ inline at::Tensor Tensor::bmm(const at::Tensor & mat2) const {
     return at::_ops::bmm::call(const_cast<Tensor&>(*this), mat2);
 }
 
-// aten::broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+// aten::broadcast_to(Tensor(a) self, SymInt[] size) -> Tensor(a)
 inline at::Tensor Tensor::broadcast_to(at::IntArrayRef size) const {
+    return at::_ops::broadcast_to::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size));
+}
+
+// aten::broadcast_to(Tensor(a) self, SymInt[] size) -> Tensor(a)
+inline at::Tensor Tensor::broadcast_to_symint(c10::SymIntArrayRef size) const {
     return at::_ops::broadcast_to::call(const_cast<Tensor&>(*this), size);
 }
 
@@ -1944,13 +2019,23 @@ inline ::std::vector<at::Tensor> Tensor::chunk(int64_t chunks, int64_t dim) cons
     return at::_ops::chunk::call(const_cast<Tensor&>(*this), chunks, dim);
 }
 
-// aten::tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]
+// aten::tensor_split.sections(Tensor(a -> *) self, SymInt sections, int dim=0) -> Tensor(a)[]
 inline ::std::vector<at::Tensor> Tensor::tensor_split(int64_t sections, int64_t dim) const {
     return at::_ops::tensor_split_sections::call(const_cast<Tensor&>(*this), sections, dim);
 }
 
-// aten::tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor(a)[]
+// aten::tensor_split.sections(Tensor(a -> *) self, SymInt sections, int dim=0) -> Tensor(a)[]
+inline ::std::vector<at::Tensor> Tensor::tensor_split_symint(c10::SymInt sections, int64_t dim) const {
+    return at::_ops::tensor_split_sections::call(const_cast<Tensor&>(*this), sections, dim);
+}
+
+// aten::tensor_split.indices(Tensor(a -> *) self, SymInt[] indices, int dim=0) -> Tensor(a)[]
 inline ::std::vector<at::Tensor> Tensor::tensor_split(at::IntArrayRef indices, int64_t dim) const {
+    return at::_ops::tensor_split_indices::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(indices), dim);
+}
+
+// aten::tensor_split.indices(Tensor(a -> *) self, SymInt[] indices, int dim=0) -> Tensor(a)[]
+inline ::std::vector<at::Tensor> Tensor::tensor_split_symint(c10::SymIntArrayRef indices, int64_t dim) const {
     return at::_ops::tensor_split_indices::call(const_cast<Tensor&>(*this), indices, dim);
 }
 
@@ -1960,22 +2045,22 @@ inline ::std::vector<at::Tensor> Tensor::tensor_split(const at::Tensor & tensor_
 }
 
 // aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
-inline at::Tensor Tensor::clamp(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) const {
+inline at::Tensor Tensor::clamp(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max) const {
     return at::_ops::clamp::call(const_cast<Tensor&>(*this), min, max);
 }
 
 // aten::clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
-inline at::Tensor Tensor::clamp(const c10::optional<at::Tensor> & min, const c10::optional<at::Tensor> & max) const {
+inline at::Tensor Tensor::clamp(const ::std::optional<at::Tensor> & min, const ::std::optional<at::Tensor> & max) const {
     return at::_ops::clamp_Tensor::call(const_cast<Tensor&>(*this), min, max);
 }
 
 // aten::clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
-inline at::Tensor & Tensor::clamp_(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) const {
+inline at::Tensor & Tensor::clamp_(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max) const {
     return at::_ops::clamp_::call(const_cast<Tensor&>(*this), min, max);
 }
 
 // aten::clamp_.Tensor(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
-inline at::Tensor & Tensor::clamp_(const c10::optional<at::Tensor> & min, const c10::optional<at::Tensor> & max) const {
+inline at::Tensor & Tensor::clamp_(const ::std::optional<at::Tensor> & min, const ::std::optional<at::Tensor> & max) const {
     return at::_ops::clamp__Tensor::call(const_cast<Tensor&>(*this), min, max);
 }
 
@@ -2020,22 +2105,22 @@ inline at::Tensor & Tensor::clamp_min_(const at::Tensor & min) const {
 }
 
 // aten::clip(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
-inline at::Tensor Tensor::clip(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) const {
+inline at::Tensor Tensor::clip(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max) const {
     return at::_ops::clip::call(const_cast<Tensor&>(*this), min, max);
 }
 
 // aten::clip.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
-inline at::Tensor Tensor::clip(const c10::optional<at::Tensor> & min, const c10::optional<at::Tensor> & max) const {
+inline at::Tensor Tensor::clip(const ::std::optional<at::Tensor> & min, const ::std::optional<at::Tensor> & max) const {
     return at::_ops::clip_Tensor::call(const_cast<Tensor&>(*this), min, max);
 }
 
 // aten::clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
-inline at::Tensor & Tensor::clip_(const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) const {
+inline at::Tensor & Tensor::clip_(const ::std::optional<at::Scalar> & min, const ::std::optional<at::Scalar> & max) const {
     return at::_ops::clip_::call(const_cast<Tensor&>(*this), min, max);
 }
 
 // aten::clip_.Tensor(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
-inline at::Tensor & Tensor::clip_(const c10::optional<at::Tensor> & min, const c10::optional<at::Tensor> & max) const {
+inline at::Tensor & Tensor::clip_(const ::std::optional<at::Tensor> & min, const ::std::optional<at::Tensor> & max) const {
     return at::_ops::clip__Tensor::call(const_cast<Tensor&>(*this), min, max);
 }
 
@@ -2075,12 +2160,12 @@ inline at::Tensor Tensor::count_nonzero(at::IntArrayRef dim) const {
 }
 
 // aten::count_nonzero(Tensor self, int? dim=None) -> Tensor
-inline at::Tensor Tensor::count_nonzero(c10::optional<int64_t> dim) const {
+inline at::Tensor Tensor::count_nonzero(::std::optional<int64_t> dim) const {
     return at::_ops::count_nonzero::call(const_cast<Tensor&>(*this), dim);
 }
 
 // aten::cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
-inline at::Tensor Tensor::cov(int64_t correction, const c10::optional<at::Tensor> & fweights, const c10::optional<at::Tensor> & aweights) const {
+inline at::Tensor Tensor::cov(int64_t correction, const ::std::optional<at::Tensor> & fweights, const ::std::optional<at::Tensor> & aweights) const {
     return at::_ops::cov::call(const_cast<Tensor&>(*this), correction, fweights, aweights);
 }
 
@@ -2110,42 +2195,42 @@ inline ::std::tuple<at::Tensor,at::Tensor> Tensor::cummin(at::Dimname dim) const
 }
 
 // aten::cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::cumprod(int64_t dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::cumprod(int64_t dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumprod::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumprod_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
-inline at::Tensor & Tensor::cumprod_(int64_t dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor & Tensor::cumprod_(int64_t dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumprod_::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::cumprod(at::Dimname dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::cumprod(at::Dimname dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumprod_dimname::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumprod_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
-inline at::Tensor & Tensor::cumprod_(at::Dimname dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor & Tensor::cumprod_(at::Dimname dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumprod__dimname::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::cumsum(int64_t dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::cumsum(int64_t dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumsum::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
-inline at::Tensor & Tensor::cumsum_(int64_t dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor & Tensor::cumsum_(int64_t dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumsum_::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::cumsum(at::Dimname dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::cumsum(at::Dimname dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumsum_dimname::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
-inline at::Tensor & Tensor::cumsum_(at::Dimname dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor & Tensor::cumsum_(at::Dimname dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::cumsum__dimname::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
@@ -2175,7 +2260,7 @@ inline at::Tensor & Tensor::fill_diagonal_(const at::Scalar & fill_value, bool w
 }
 
 // aten::diff(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
-inline at::Tensor Tensor::diff(int64_t n, int64_t dim, const c10::optional<at::Tensor> & prepend, const c10::optional<at::Tensor> & append) const {
+inline at::Tensor Tensor::diff(int64_t n, int64_t dim, const ::std::optional<at::Tensor> & prepend, const ::std::optional<at::Tensor> & append) const {
     return at::_ops::diff::call(const_cast<Tensor&>(*this), n, dim, prepend, append);
 }
 
@@ -2190,12 +2275,12 @@ inline at::Tensor & Tensor::div_(const at::Tensor & other) const {
 }
 
 // aten::div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
-inline at::Tensor Tensor::div(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor Tensor::div(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::div_Tensor_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
 // aten::div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
-inline at::Tensor & Tensor::div_(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor & Tensor::div_(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::div__Tensor_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
@@ -2210,12 +2295,12 @@ inline at::Tensor & Tensor::div_(const at::Scalar & other) const {
 }
 
 // aten::div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
-inline at::Tensor Tensor::div(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor Tensor::div(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::div_Scalar_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
 // aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
-inline at::Tensor & Tensor::div_(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor & Tensor::div_(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::div__Scalar_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
@@ -2240,22 +2325,22 @@ inline at::Tensor & Tensor::divide_(const at::Scalar & other) const {
 }
 
 // aten::divide.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
-inline at::Tensor Tensor::divide(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor Tensor::divide(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::divide_Tensor_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
 // aten::divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
-inline at::Tensor & Tensor::divide_(const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor & Tensor::divide_(const at::Tensor & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::divide__Tensor_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
 // aten::divide.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
-inline at::Tensor Tensor::divide(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor Tensor::divide(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::divide_Scalar_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
 // aten::divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
-inline at::Tensor & Tensor::divide_(const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) const {
+inline at::Tensor & Tensor::divide_(const at::Scalar & other, ::std::optional<c10::string_view> rounding_mode) const {
     return at::_ops::divide__Scalar_mode::call(const_cast<Tensor&>(*this), other, rounding_mode);
 }
 
@@ -2291,111 +2376,111 @@ inline at::Tensor Tensor::vdot(const at::Tensor & other) const {
 
 // aten::new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_empty(at::IntArrayRef size, at::TensorOptions options) const {
-    return at::_ops::new_empty::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_empty::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_empty(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
-    return at::_ops::new_empty::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), dtype, layout, device, pin_memory);
+inline at::Tensor Tensor::new_empty(at::IntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
+    return at::_ops::new_empty::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 // aten::new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_empty_symint(c10::SymIntArrayRef size, at::TensorOptions options) const {
-    return at::_ops::new_empty::call(const_cast<Tensor&>(*this), size, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_empty::call(const_cast<Tensor&>(*this), size, c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_empty_symint(c10::SymIntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
+inline at::Tensor Tensor::new_empty_symint(c10::SymIntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
     return at::_ops::new_empty::call(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 }
 
 // aten::new_empty_strided(Tensor self, SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_empty_strided(at::IntArrayRef size, at::IntArrayRef stride, at::TensorOptions options) const {
-    return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_empty_strided(Tensor self, SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_empty_strided(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
-    return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), dtype, layout, device, pin_memory);
+inline at::Tensor Tensor::new_empty_strided(at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
+    return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), dtype, layout, device, pin_memory);
 }
 
 // aten::new_empty_strided(Tensor self, SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_empty_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, at::TensorOptions options) const {
-    return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), size, stride, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), size, stride, c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_empty_strided(Tensor self, SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_empty_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
+inline at::Tensor Tensor::new_empty_strided_symint(c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
     return at::_ops::new_empty_strided::call(const_cast<Tensor&>(*this), size, stride, dtype, layout, device, pin_memory);
 }
 
 // aten::new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_full(at::IntArrayRef size, const at::Scalar & fill_value, at::TensorOptions options) const {
-    return at::_ops::new_full::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), fill_value, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_full::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), fill_value, c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_full(at::IntArrayRef size, const at::Scalar & fill_value, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
-    return at::_ops::new_full::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), fill_value, dtype, layout, device, pin_memory);
+inline at::Tensor Tensor::new_full(at::IntArrayRef size, const at::Scalar & fill_value, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
+    return at::_ops::new_full::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), fill_value, dtype, layout, device, pin_memory);
 }
 
 // aten::new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_full_symint(c10::SymIntArrayRef size, const at::Scalar & fill_value, at::TensorOptions options) const {
-    return at::_ops::new_full::call(const_cast<Tensor&>(*this), size, fill_value, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_full::call(const_cast<Tensor&>(*this), size, fill_value, c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_full_symint(c10::SymIntArrayRef size, const at::Scalar & fill_value, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
+inline at::Tensor Tensor::new_full_symint(c10::SymIntArrayRef size, const at::Scalar & fill_value, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
     return at::_ops::new_full::call(const_cast<Tensor&>(*this), size, fill_value, dtype, layout, device, pin_memory);
 }
 
 // aten::new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_zeros(at::IntArrayRef size, at::TensorOptions options) const {
-    return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_zeros(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
-    return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), dtype, layout, device, pin_memory);
+inline at::Tensor Tensor::new_zeros(at::IntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
+    return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 // aten::new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_zeros_symint(c10::SymIntArrayRef size, at::TensorOptions options) const {
-    return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), size, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), size, c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_zeros_symint(c10::SymIntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
+inline at::Tensor Tensor::new_zeros_symint(c10::SymIntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
     return at::_ops::new_zeros::call(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 }
 
 // aten::new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_ones(at::IntArrayRef size, at::TensorOptions options) const {
-    return at::_ops::new_ones::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_ones::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_ones(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
-    return at::_ops::new_ones::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), dtype, layout, device, pin_memory);
+inline at::Tensor Tensor::new_ones(at::IntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
+    return at::_ops::new_ones::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 // aten::new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 inline at::Tensor Tensor::new_ones_symint(c10::SymIntArrayRef size, at::TensorOptions options) const {
-    return at::_ops::new_ones::call(const_cast<Tensor&>(*this), size, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
+    return at::_ops::new_ones::call(const_cast<Tensor&>(*this), size, c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
 }
 
 // aten::new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-inline at::Tensor Tensor::new_ones_symint(c10::SymIntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) const {
+inline at::Tensor Tensor::new_ones_symint(c10::SymIntArrayRef size, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory) const {
     return at::_ops::new_ones::call(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 }
 
 // aten::resize_(Tensor(a!) self, SymInt[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
-inline const at::Tensor & Tensor::resize_(at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) const {
-    return at::_ops::resize_::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), memory_format);
+inline const at::Tensor & Tensor::resize_(at::IntArrayRef size, ::std::optional<at::MemoryFormat> memory_format) const {
+    return at::_ops::resize_::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), memory_format);
 }
 
 // aten::resize_(Tensor(a!) self, SymInt[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
-inline const at::Tensor & Tensor::resize__symint(c10::SymIntArrayRef size, c10::optional<at::MemoryFormat> memory_format) const {
+inline const at::Tensor & Tensor::resize__symint(c10::SymIntArrayRef size, ::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::resize_::call(const_cast<Tensor&>(*this), size, memory_format);
 }
 
@@ -2451,7 +2536,7 @@ inline at::Tensor & Tensor::expm1_() const {
 
 // aten::expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
 inline at::Tensor Tensor::expand(at::IntArrayRef size, bool implicit) const {
-    return at::_ops::expand::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), implicit);
+    return at::_ops::expand::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), implicit);
 }
 
 // aten::expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
@@ -2484,13 +2569,23 @@ inline at::Tensor Tensor::flatten(at::DimnameList dims, at::Dimname out_dim) con
     return at::_ops::flatten_DimnameList::call(const_cast<Tensor&>(*this), dims, out_dim);
 }
 
-// aten::unflatten.int(Tensor(a) self, int dim, int[] sizes) -> Tensor(a)
+// aten::unflatten.int(Tensor(a) self, int dim, SymInt[] sizes) -> Tensor(a)
 inline at::Tensor Tensor::unflatten(int64_t dim, at::IntArrayRef sizes) const {
+    return at::_ops::unflatten_int::call(const_cast<Tensor&>(*this), dim, c10::fromIntArrayRefSlow(sizes));
+}
+
+// aten::unflatten.int(Tensor(a) self, int dim, SymInt[] sizes) -> Tensor(a)
+inline at::Tensor Tensor::unflatten_symint(int64_t dim, c10::SymIntArrayRef sizes) const {
     return at::_ops::unflatten_int::call(const_cast<Tensor&>(*this), dim, sizes);
 }
 
-// aten::unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
+// aten::unflatten.Dimname(Tensor(a) self, Dimname dim, SymInt[] sizes, Dimname[] names) -> Tensor(a)
 inline at::Tensor Tensor::unflatten(at::Dimname dim, at::IntArrayRef sizes, at::DimnameList names) const {
+    return at::_ops::unflatten_Dimname::call(const_cast<Tensor&>(*this), dim, c10::fromIntArrayRefSlow(sizes), names);
+}
+
+// aten::unflatten.Dimname(Tensor(a) self, Dimname dim, SymInt[] sizes, Dimname[] names) -> Tensor(a)
+inline at::Tensor Tensor::unflatten_symint(at::Dimname dim, c10::SymIntArrayRef sizes, at::DimnameList names) const {
     return at::_ops::unflatten_Dimname::call(const_cast<Tensor&>(*this), dim, sizes, names);
 }
 
@@ -2565,7 +2660,7 @@ inline at::Tensor & Tensor::lcm_(const at::Tensor & other) const {
 }
 
 // aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
-inline at::Tensor Tensor::index(const c10::List<c10::optional<at::Tensor>> & indices) const {
+inline at::Tensor Tensor::index(const c10::List<::std::optional<at::Tensor>> & indices) const {
     return at::_ops::index_Tensor::call(const_cast<Tensor&>(*this), indices);
 }
 
@@ -2590,12 +2685,12 @@ inline at::Tensor Tensor::index_copy(at::Dimname dim, const at::Tensor & index, 
 }
 
 // aten::index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
-inline at::Tensor & Tensor::index_put_(const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate) const {
+inline at::Tensor & Tensor::index_put_(const c10::List<::std::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate) const {
     return at::_ops::index_put_::call(const_cast<Tensor&>(*this), indices, values, accumulate);
 }
 
 // aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
-inline at::Tensor Tensor::index_put(const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate) const {
+inline at::Tensor Tensor::index_put(const c10::List<::std::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate) const {
     return at::_ops::index_put::call(const_cast<Tensor&>(*this), indices, values, accumulate);
 }
 
@@ -2680,12 +2775,12 @@ inline ::std::tuple<at::Tensor,at::Tensor> Tensor::kthvalue(int64_t k, at::Dimna
 }
 
 // aten::nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
-inline at::Tensor Tensor::nan_to_num(c10::optional<double> nan, c10::optional<double> posinf, c10::optional<double> neginf) const {
+inline at::Tensor Tensor::nan_to_num(::std::optional<double> nan, ::std::optional<double> posinf, ::std::optional<double> neginf) const {
     return at::_ops::nan_to_num::call(const_cast<Tensor&>(*this), nan, posinf, neginf);
 }
 
 // aten::nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
-inline at::Tensor & Tensor::nan_to_num_(c10::optional<double> nan, c10::optional<double> posinf, c10::optional<double> neginf) const {
+inline at::Tensor & Tensor::nan_to_num_(::std::optional<double> nan, ::std::optional<double> posinf, ::std::optional<double> neginf) const {
     return at::_ops::nan_to_num_::call(const_cast<Tensor&>(*this), nan, posinf, neginf);
 }
 
@@ -2770,12 +2865,12 @@ inline at::Tensor & Tensor::xlogy_(const at::Scalar & other) const {
 }
 
 // aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::log_softmax(int64_t dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::log_softmax(int64_t dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::log_softmax_int::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::log_softmax(at::Dimname dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::log_softmax(at::Dimname dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::log_softmax_Dimname::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
@@ -2815,7 +2910,7 @@ inline at::Tensor Tensor::matrix_exp() const {
 }
 
 // aten::aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::aminmax(c10::optional<int64_t> dim, bool keepdim) const {
+inline ::std::tuple<at::Tensor,at::Tensor> Tensor::aminmax(::std::optional<int64_t> dim, bool keepdim) const {
     return at::_ops::aminmax::call(const_cast<Tensor&>(*this), dim, keepdim);
 }
 
@@ -2835,22 +2930,22 @@ inline at::Tensor Tensor::amax(at::IntArrayRef dim, bool keepdim) const {
 }
 
 // aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::mean(c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::mean(::std::optional<at::ScalarType> dtype) const {
     return at::_ops::mean::call(const_cast<Tensor&>(*this), dtype);
 }
 
 // aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::mean(at::OptionalIntArrayRef dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::mean(at::OptionalIntArrayRef dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::mean_dim::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
 // aten::mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::mean(at::DimnameList dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::mean(at::DimnameList dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::mean_names_dim::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
 // aten::nanmean(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::nanmean(at::OptionalIntArrayRef dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::nanmean(at::OptionalIntArrayRef dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::nanmean::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
@@ -2979,13 +3074,23 @@ inline at::Tensor Tensor::narrow_copy_symint(int64_t dim, c10::SymInt start, c10
     return at::_ops::narrow_copy::call(const_cast<Tensor&>(*this), dim, start, length);
 }
 
-// aten::narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
+// aten::narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
 inline at::Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
     return at::_ops::narrow::call(const_cast<Tensor&>(*this), dim, start, length);
 }
 
-// aten::narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
+// aten::narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
+inline at::Tensor Tensor::narrow_symint(int64_t dim, c10::SymInt start, c10::SymInt length) const {
+    return at::_ops::narrow::call(const_cast<Tensor&>(*this), dim, start, length);
+}
+
+// aten::narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
 inline at::Tensor Tensor::narrow(int64_t dim, const at::Tensor & start, int64_t length) const {
+    return at::_ops::narrow_Tensor::call(const_cast<Tensor&>(*this), dim, start, length);
+}
+
+// aten::narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
+inline at::Tensor Tensor::narrow_symint(int64_t dim, const at::Tensor & start, c10::SymInt length) const {
     return at::_ops::narrow_Tensor::call(const_cast<Tensor&>(*this), dim, start, length);
 }
 
@@ -3040,12 +3145,12 @@ inline at::Tensor Tensor::adjoint() const {
 }
 
 // aten::is_pinned(Tensor self, Device? device=None) -> bool
-inline bool Tensor::is_pinned(c10::optional<at::Device> device) const {
+inline bool Tensor::is_pinned(::std::optional<at::Device> device) const {
     return at::_ops::is_pinned::call(const_cast<Tensor&>(*this), device);
 }
 
 // aten::pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
-inline at::Tensor Tensor::pin_memory(c10::optional<at::Device> device) const {
+inline at::Tensor Tensor::pin_memory(::std::optional<at::Device> device) const {
     return at::_ops::pin_memory::call(const_cast<Tensor&>(*this), device);
 }
 
@@ -3111,7 +3216,7 @@ inline at::Tensor & Tensor::negative_() const {
 
 // aten::repeat(Tensor self, SymInt[] repeats) -> Tensor
 inline at::Tensor Tensor::repeat(at::IntArrayRef repeats) const {
-    return at::_ops::repeat::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(repeats));
+    return at::_ops::repeat::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(repeats));
 }
 
 // aten::repeat(Tensor self, SymInt[] repeats) -> Tensor
@@ -3119,19 +3224,29 @@ inline at::Tensor Tensor::repeat_symint(c10::SymIntArrayRef repeats) const {
     return at::_ops::repeat::call(const_cast<Tensor&>(*this), repeats);
 }
 
-// aten::repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, int? output_size=None) -> Tensor
-inline at::Tensor Tensor::repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> dim, c10::optional<int64_t> output_size) const {
+// aten::repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
+inline at::Tensor Tensor::repeat_interleave(const at::Tensor & repeats, ::std::optional<int64_t> dim, ::std::optional<int64_t> output_size) const {
+    return at::_ops::repeat_interleave_self_Tensor::call(const_cast<Tensor&>(*this), repeats, dim, output_size.has_value() ? ::std::make_optional(c10::SymInt(*output_size)) : ::std::nullopt);
+}
+
+// aten::repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
+inline at::Tensor Tensor::repeat_interleave_symint(const at::Tensor & repeats, ::std::optional<int64_t> dim, ::std::optional<c10::SymInt> output_size) const {
     return at::_ops::repeat_interleave_self_Tensor::call(const_cast<Tensor&>(*this), repeats, dim, output_size);
 }
 
-// aten::repeat_interleave.self_int(Tensor self, int repeats, int? dim=None, *, int? output_size=None) -> Tensor
-inline at::Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> dim, c10::optional<int64_t> output_size) const {
+// aten::repeat_interleave.self_int(Tensor self, SymInt repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
+inline at::Tensor Tensor::repeat_interleave(int64_t repeats, ::std::optional<int64_t> dim, ::std::optional<int64_t> output_size) const {
+    return at::_ops::repeat_interleave_self_int::call(const_cast<Tensor&>(*this), repeats, dim, output_size.has_value() ? ::std::make_optional(c10::SymInt(*output_size)) : ::std::nullopt);
+}
+
+// aten::repeat_interleave.self_int(Tensor self, SymInt repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
+inline at::Tensor Tensor::repeat_interleave_symint(c10::SymInt repeats, ::std::optional<int64_t> dim, ::std::optional<c10::SymInt> output_size) const {
     return at::_ops::repeat_interleave_self_int::call(const_cast<Tensor&>(*this), repeats, dim, output_size);
 }
 
 // aten::reshape(Tensor(a) self, SymInt[] shape) -> Tensor(a)
 inline at::Tensor Tensor::reshape(at::IntArrayRef shape) const {
-    return at::_ops::reshape::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(shape));
+    return at::_ops::reshape::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(shape));
 }
 
 // aten::reshape(Tensor(a) self, SymInt[] shape) -> Tensor(a)
@@ -3141,7 +3256,7 @@ inline at::Tensor Tensor::reshape_symint(c10::SymIntArrayRef shape) const {
 
 // aten::_reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
 inline at::Tensor Tensor::_reshape_alias(at::IntArrayRef size, at::IntArrayRef stride) const {
-    return at::_ops::_reshape_alias::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride));
+    return at::_ops::_reshape_alias::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride));
 }
 
 // aten::_reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
@@ -3189,11 +3304,6 @@ inline at::Tensor Tensor::prelu(const at::Tensor & weight) const {
     return at::_ops::prelu::call(const_cast<Tensor&>(*this), weight);
 }
 
-// aten::prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::prelu_backward(const at::Tensor & grad_output, const at::Tensor & weight) const {
-    return at::_ops::prelu_backward::call(grad_output, const_cast<Tensor&>(*this), weight);
-}
-
 // aten::hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
 inline at::Tensor Tensor::hardshrink(const at::Scalar & lambd) const {
     return at::_ops::hardshrink::call(const_cast<Tensor&>(*this), lambd);
@@ -3219,8 +3329,13 @@ inline at::Tensor Tensor::select(at::Dimname dim, int64_t index) const {
     return at::_ops::select_Dimname::call(const_cast<Tensor&>(*this), dim, index);
 }
 
-// aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
+// aten::select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
 inline at::Tensor Tensor::select(int64_t dim, int64_t index) const {
+    return at::_ops::select_int::call(const_cast<Tensor&>(*this), dim, index);
+}
+
+// aten::select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
+inline at::Tensor Tensor::select_symint(int64_t dim, c10::SymInt index) const {
     return at::_ops::select_int::call(const_cast<Tensor&>(*this), dim, index);
 }
 
@@ -3235,12 +3350,12 @@ inline at::Tensor & Tensor::sigmoid_() const {
 }
 
 // aten::logit(Tensor self, float? eps=None) -> Tensor
-inline at::Tensor Tensor::logit(c10::optional<double> eps) const {
+inline at::Tensor Tensor::logit(::std::optional<double> eps) const {
     return at::_ops::logit::call(const_cast<Tensor&>(*this), eps);
 }
 
 // aten::logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
-inline at::Tensor & Tensor::logit_(c10::optional<double> eps) const {
+inline at::Tensor & Tensor::logit_(::std::optional<double> eps) const {
     return at::_ops::logit_::call(const_cast<Tensor&>(*this), eps);
 }
 
@@ -3290,27 +3405,42 @@ inline int64_t Tensor::size(at::Dimname dim) const {
 }
 
 // aten::slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
-inline at::Tensor Tensor::slice(int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) const {
-    return at::_ops::slice_Tensor::call(const_cast<Tensor&>(*this), dim, start.has_value() ? c10::make_optional(c10::SymInt(*start)) : c10::nullopt, end.has_value() ? c10::make_optional(c10::SymInt(*end)) : c10::nullopt, step);
+inline at::Tensor Tensor::slice(int64_t dim, ::std::optional<int64_t> start, ::std::optional<int64_t> end, int64_t step) const {
+    return at::_ops::slice_Tensor::call(const_cast<Tensor&>(*this), dim, start.has_value() ? ::std::make_optional(c10::SymInt(*start)) : ::std::nullopt, end.has_value() ? ::std::make_optional(c10::SymInt(*end)) : ::std::nullopt, step);
 }
 
 // aten::slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
-inline at::Tensor Tensor::slice_symint(int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) const {
+inline at::Tensor Tensor::slice_symint(int64_t dim, ::std::optional<c10::SymInt> start, ::std::optional<c10::SymInt> end, c10::SymInt step) const {
     return at::_ops::slice_Tensor::call(const_cast<Tensor&>(*this), dim, start, end, step);
 }
 
-// aten::slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
-inline at::Tensor Tensor::slice_scatter(const at::Tensor & src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) const {
-    return at::_ops::slice_scatter::call(const_cast<Tensor&>(*this), src, dim, start.has_value() ? c10::make_optional(c10::SymInt(*start)) : c10::nullopt, end.has_value() ? c10::make_optional(c10::SymInt(*end)) : c10::nullopt, step);
+// aten::slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+inline at::Tensor Tensor::slice_inverse(const at::Tensor & src, int64_t dim, ::std::optional<int64_t> start, ::std::optional<int64_t> end, int64_t step) const {
+    return at::_ops::slice_inverse::call(const_cast<Tensor&>(*this), src, dim, start.has_value() ? ::std::make_optional(c10::SymInt(*start)) : ::std::nullopt, end.has_value() ? ::std::make_optional(c10::SymInt(*end)) : ::std::nullopt, step);
+}
+
+// aten::slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+inline at::Tensor Tensor::slice_inverse_symint(const at::Tensor & src, int64_t dim, ::std::optional<c10::SymInt> start, ::std::optional<c10::SymInt> end, c10::SymInt step) const {
+    return at::_ops::slice_inverse::call(const_cast<Tensor&>(*this), src, dim, start, end, step);
 }
 
 // aten::slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
-inline at::Tensor Tensor::slice_scatter_symint(const at::Tensor & src, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) const {
+inline at::Tensor Tensor::slice_scatter(const at::Tensor & src, int64_t dim, ::std::optional<int64_t> start, ::std::optional<int64_t> end, int64_t step) const {
+    return at::_ops::slice_scatter::call(const_cast<Tensor&>(*this), src, dim, start.has_value() ? ::std::make_optional(c10::SymInt(*start)) : ::std::nullopt, end.has_value() ? ::std::make_optional(c10::SymInt(*end)) : ::std::nullopt, step);
+}
+
+// aten::slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
+inline at::Tensor Tensor::slice_scatter_symint(const at::Tensor & src, int64_t dim, ::std::optional<c10::SymInt> start, ::std::optional<c10::SymInt> end, c10::SymInt step) const {
     return at::_ops::slice_scatter::call(const_cast<Tensor&>(*this), src, dim, start, end, step);
 }
 
-// aten::select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+// aten::select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
 inline at::Tensor Tensor::select_scatter(const at::Tensor & src, int64_t dim, int64_t index) const {
+    return at::_ops::select_scatter::call(const_cast<Tensor&>(*this), src, dim, index);
+}
+
+// aten::select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
+inline at::Tensor Tensor::select_scatter_symint(const at::Tensor & src, int64_t dim, c10::SymInt index) const {
     return at::_ops::select_scatter::call(const_cast<Tensor&>(*this), src, dim, index);
 }
 
@@ -3320,12 +3450,12 @@ inline at::Tensor Tensor::diagonal_scatter(const at::Tensor & src, int64_t offse
 }
 
 // aten::as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
-inline at::Tensor Tensor::as_strided_scatter(const at::Tensor & src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
-    return at::_ops::as_strided_scatter::call(const_cast<Tensor&>(*this), src, c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), storage_offset.has_value() ? c10::make_optional(c10::SymInt(*storage_offset)) : c10::nullopt);
+inline at::Tensor Tensor::as_strided_scatter(const at::Tensor & src, at::IntArrayRef size, at::IntArrayRef stride, ::std::optional<int64_t> storage_offset) const {
+    return at::_ops::as_strided_scatter::call(const_cast<Tensor&>(*this), src, c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), storage_offset.has_value() ? ::std::make_optional(c10::SymInt(*storage_offset)) : ::std::nullopt);
 }
 
 // aten::as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
-inline at::Tensor Tensor::as_strided_scatter_symint(const at::Tensor & src, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) const {
+inline at::Tensor Tensor::as_strided_scatter_symint(const at::Tensor & src, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, ::std::optional<c10::SymInt> storage_offset) const {
     return at::_ops::as_strided_scatter::call(const_cast<Tensor&>(*this), src, size, stride, storage_offset);
 }
 
@@ -3335,37 +3465,62 @@ inline at::Tensor Tensor::smm(const at::Tensor & mat2) const {
 }
 
 // aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::softmax(int64_t dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::softmax(int64_t dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::softmax_int::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
 // aten::softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::softmax(at::Dimname dim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::softmax(at::Dimname dim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::softmax_Dimname::call(const_cast<Tensor&>(*this), dim, dtype);
 }
 
-// aten::unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+// aten::unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
 inline ::std::vector<at::Tensor> Tensor::unsafe_split(int64_t split_size, int64_t dim) const {
     return at::_ops::unsafe_split_Tensor::call(const_cast<Tensor&>(*this), split_size, dim);
 }
 
-// aten::split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
+// aten::unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
+inline ::std::vector<at::Tensor> Tensor::unsafe_split_symint(c10::SymInt split_size, int64_t dim) const {
+    return at::_ops::unsafe_split_Tensor::call(const_cast<Tensor&>(*this), split_size, dim);
+}
+
+// aten::split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
 inline ::std::vector<at::Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
     return at::_ops::split_Tensor::call(const_cast<Tensor&>(*this), split_size, dim);
 }
 
-// aten::split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
+// aten::split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
+inline ::std::vector<at::Tensor> Tensor::split_symint(c10::SymInt split_size, int64_t dim) const {
+    return at::_ops::split_Tensor::call(const_cast<Tensor&>(*this), split_size, dim);
+}
+
+// aten::split.sizes(Tensor(a -> *) self, SymInt[] split_size, int dim=0) -> Tensor(a)[]
 inline ::std::vector<at::Tensor> Tensor::split(at::IntArrayRef split_size, int64_t dim) const {
+    return at::_ops::split_sizes::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(split_size), dim);
+}
+
+// aten::split.sizes(Tensor(a -> *) self, SymInt[] split_size, int dim=0) -> Tensor(a)[]
+inline ::std::vector<at::Tensor> Tensor::split_symint(c10::SymIntArrayRef split_size, int64_t dim) const {
     return at::_ops::split_sizes::call(const_cast<Tensor&>(*this), split_size, dim);
 }
 
-// aten::unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+// aten::unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
 inline ::std::vector<at::Tensor> Tensor::unsafe_split_with_sizes(at::IntArrayRef split_sizes, int64_t dim) const {
+    return at::_ops::unsafe_split_with_sizes::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(split_sizes), dim);
+}
+
+// aten::unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
+inline ::std::vector<at::Tensor> Tensor::unsafe_split_with_sizes_symint(c10::SymIntArrayRef split_sizes, int64_t dim) const {
     return at::_ops::unsafe_split_with_sizes::call(const_cast<Tensor&>(*this), split_sizes, dim);
 }
 
-// aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+// aten::split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
 inline ::std::vector<at::Tensor> Tensor::split_with_sizes(at::IntArrayRef split_sizes, int64_t dim) const {
+    return at::_ops::split_with_sizes::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(split_sizes), dim);
+}
+
+// aten::split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
+inline ::std::vector<at::Tensor> Tensor::split_with_sizes_symint(c10::SymIntArrayRef split_sizes, int64_t dim) const {
     return at::_ops::split_with_sizes::call(const_cast<Tensor&>(*this), split_sizes, dim);
 }
 
@@ -3414,6 +3569,11 @@ inline at::Tensor Tensor::squeeze(at::Dimname dim) const {
     return at::_ops::squeeze_dimname::call(const_cast<Tensor&>(*this), dim);
 }
 
+// aten::squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
+inline at::Tensor Tensor::squeeze(at::IntArrayRef dim) const {
+    return at::_ops::squeeze_dims::call(const_cast<Tensor&>(*this), dim);
+}
+
 // aten::squeeze_(Tensor(a!) self) -> Tensor(a!)
 inline at::Tensor & Tensor::squeeze_() const {
     return at::_ops::squeeze_::call(const_cast<Tensor&>(*this));
@@ -3422,6 +3582,11 @@ inline at::Tensor & Tensor::squeeze_() const {
 // aten::squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
 inline at::Tensor & Tensor::squeeze_(int64_t dim) const {
     return at::_ops::squeeze__dim::call(const_cast<Tensor&>(*this), dim);
+}
+
+// aten::squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
+inline at::Tensor & Tensor::squeeze_(at::IntArrayRef dim) const {
+    return at::_ops::squeeze__dims::call(const_cast<Tensor&>(*this), dim);
 }
 
 // aten::squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)
@@ -3435,17 +3600,17 @@ inline at::Tensor Tensor::sspaddmm(const at::Tensor & mat1, const at::Tensor & m
 }
 
 // aten::stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
-inline at::Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const c10::optional<at::Tensor> & window, bool normalized, c10::optional<bool> onesided, c10::optional<bool> return_complex) const {
+inline at::Tensor Tensor::stft(int64_t n_fft, ::std::optional<int64_t> hop_length, ::std::optional<int64_t> win_length, const ::std::optional<at::Tensor> & window, bool normalized, ::std::optional<bool> onesided, ::std::optional<bool> return_complex) const {
     return at::_ops::stft::call(const_cast<Tensor&>(*this), n_fft, hop_length, win_length, window, normalized, onesided, return_complex);
 }
 
 // aten::stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
-inline at::Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const c10::optional<at::Tensor> & window, bool center, c10::string_view pad_mode, bool normalized, c10::optional<bool> onesided, c10::optional<bool> return_complex) const {
+inline at::Tensor Tensor::stft(int64_t n_fft, ::std::optional<int64_t> hop_length, ::std::optional<int64_t> win_length, const ::std::optional<at::Tensor> & window, bool center, c10::string_view pad_mode, bool normalized, ::std::optional<bool> onesided, ::std::optional<bool> return_complex) const {
     return at::_ops::stft_center::call(const_cast<Tensor&>(*this), n_fft, hop_length, win_length, window, center, pad_mode, normalized, onesided, return_complex);
 }
 
 // aten::istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
-inline at::Tensor Tensor::istft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const c10::optional<at::Tensor> & window, bool center, bool normalized, c10::optional<bool> onesided, c10::optional<int64_t> length, bool return_complex) const {
+inline at::Tensor Tensor::istft(int64_t n_fft, ::std::optional<int64_t> hop_length, ::std::optional<int64_t> win_length, const ::std::optional<at::Tensor> & window, bool center, bool normalized, ::std::optional<bool> onesided, ::std::optional<int64_t> length, bool return_complex) const {
     return at::_ops::istft::call(const_cast<Tensor&>(*this), n_fft, hop_length, win_length, window, center, normalized, onesided, length, return_complex);
 }
 
@@ -3455,27 +3620,32 @@ inline int64_t Tensor::stride(at::Dimname dim) const {
 }
 
 // aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::sum(c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::sum(::std::optional<at::ScalarType> dtype) const {
     return at::_ops::sum::call(const_cast<Tensor&>(*this), dtype);
 }
 
 // aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::sum(at::OptionalIntArrayRef dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::sum(at::OptionalIntArrayRef dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::sum_dim_IntList::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
 // aten::sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::sum(at::DimnameList dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::sum(at::DimnameList dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::sum_dim_DimnameList::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
 // aten::nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::nansum(at::OptionalIntArrayRef dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::nansum(at::OptionalIntArrayRef dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::nansum::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
-// aten::sum_to_size(Tensor self, int[] size) -> Tensor
+// aten::sum_to_size(Tensor self, SymInt[] size) -> Tensor
 inline at::Tensor Tensor::sum_to_size(at::IntArrayRef size) const {
+    return at::_ops::sum_to_size::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size));
+}
+
+// aten::sum_to_size(Tensor self, SymInt[] size) -> Tensor
+inline at::Tensor Tensor::sum_to_size_symint(c10::SymIntArrayRef size) const {
     return at::_ops::sum_to_size::call(const_cast<Tensor&>(*this), size);
 }
 
@@ -3509,8 +3679,8 @@ inline at::Tensor Tensor::std(at::OptionalIntArrayRef dim, bool unbiased, bool k
     return at::_ops::std_dim::call(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 }
 
-// aten::std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::std(at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim) const {
+// aten::std.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor
+inline at::Tensor Tensor::std(at::OptionalIntArrayRef dim, const ::std::optional<at::Scalar> & correction, bool keepdim) const {
     return at::_ops::std_correction::call(const_cast<Tensor&>(*this), dim, correction, keepdim);
 }
 
@@ -3519,23 +3689,23 @@ inline at::Tensor Tensor::std(at::DimnameList dim, bool unbiased, bool keepdim) 
     return at::_ops::std_names_dim::call(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 }
 
-// aten::std.correction_names(Tensor self, Dimname[1] dim, *, int? correction, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::std(at::DimnameList dim, c10::optional<int64_t> correction, bool keepdim) const {
+// aten::std.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> Tensor
+inline at::Tensor Tensor::std(at::DimnameList dim, const ::std::optional<at::Scalar> & correction, bool keepdim) const {
     return at::_ops::std_correction_names::call(const_cast<Tensor&>(*this), dim, correction, keepdim);
 }
 
 // aten::prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::prod(c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::prod(::std::optional<at::ScalarType> dtype) const {
     return at::_ops::prod::call(const_cast<Tensor&>(*this), dtype);
 }
 
 // aten::prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::prod(int64_t dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::prod_dim_int::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
 // aten::prod.dim_Dimname(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::prod(at::Dimname dim, bool keepdim, c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::prod(at::Dimname dim, bool keepdim, ::std::optional<at::ScalarType> dtype) const {
     return at::_ops::prod_dim_Dimname::call(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 }
 
@@ -3569,8 +3739,13 @@ inline at::Tensor & Tensor::tanh_() const {
     return at::_ops::tanh_::call(const_cast<Tensor&>(*this));
 }
 
-// aten::tile(Tensor self, int[] dims) -> Tensor
+// aten::tile(Tensor self, SymInt[] dims) -> Tensor
 inline at::Tensor Tensor::tile(at::IntArrayRef dims) const {
+    return at::_ops::tile::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(dims));
+}
+
+// aten::tile(Tensor self, SymInt[] dims) -> Tensor
+inline at::Tensor Tensor::tile_symint(c10::SymIntArrayRef dims) const {
     return at::_ops::tile::call(const_cast<Tensor&>(*this), dims);
 }
 
@@ -3604,8 +3779,13 @@ inline at::Tensor Tensor::flipud() const {
     return at::_ops::flipud::call(const_cast<Tensor&>(*this));
 }
 
-// aten::roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
+// aten::roll(Tensor self, SymInt[1] shifts, int[1] dims=[]) -> Tensor
 inline at::Tensor Tensor::roll(at::IntArrayRef shifts, at::IntArrayRef dims) const {
+    return at::_ops::roll::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(shifts), dims);
+}
+
+// aten::roll(Tensor self, SymInt[1] shifts, int[1] dims=[]) -> Tensor
+inline at::Tensor Tensor::roll_symint(c10::SymIntArrayRef shifts, at::IntArrayRef dims) const {
     return at::_ops::roll::call(const_cast<Tensor&>(*this), shifts, dims);
 }
 
@@ -3624,9 +3804,9 @@ inline at::Tensor Tensor::_nested_tensor_strides() const {
     return at::_ops::_nested_tensor_strides::call(const_cast<Tensor&>(*this));
 }
 
-// aten::_nested_tensor_offsets(Tensor self) -> int[]
-inline ::std::vector<int64_t> Tensor::_nested_tensor_offsets() const {
-    return at::_ops::_nested_tensor_offsets::call(const_cast<Tensor&>(*this));
+// aten::_nested_tensor_storage_offsets(Tensor self) -> Tensor
+inline at::Tensor Tensor::_nested_tensor_storage_offsets() const {
+    return at::_ops::_nested_tensor_storage_offsets::call(const_cast<Tensor&>(*this));
 }
 
 // aten::trunc(Tensor self) -> Tensor
@@ -3674,8 +3854,8 @@ inline at::Tensor Tensor::var(at::OptionalIntArrayRef dim, bool unbiased, bool k
     return at::_ops::var_dim::call(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 }
 
-// aten::var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::var(at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim) const {
+// aten::var.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor
+inline at::Tensor Tensor::var(at::OptionalIntArrayRef dim, const ::std::optional<at::Scalar> & correction, bool keepdim) const {
     return at::_ops::var_correction::call(const_cast<Tensor&>(*this), dim, correction, keepdim);
 }
 
@@ -3684,8 +3864,8 @@ inline at::Tensor Tensor::var(at::DimnameList dim, bool unbiased, bool keepdim) 
     return at::_ops::var_names_dim::call(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 }
 
-// aten::var.correction_names(Tensor self, Dimname[1] dim, *, int? correction, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::var(at::DimnameList dim, c10::optional<int64_t> correction, bool keepdim) const {
+// aten::var.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> Tensor
+inline at::Tensor Tensor::var(at::DimnameList dim, const ::std::optional<at::Scalar> & correction, bool keepdim) const {
     return at::_ops::var_correction_names::call(const_cast<Tensor&>(*this), dim, correction, keepdim);
 }
 
@@ -3699,8 +3879,13 @@ inline at::Tensor Tensor::where(const at::Tensor & condition, const at::Tensor &
     return at::_ops::where_self::call(condition, const_cast<Tensor&>(*this), other);
 }
 
+// aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor
+inline at::Tensor Tensor::where(const at::Tensor & condition, const at::Scalar & other) const {
+    return at::_ops::where_ScalarOther::call(condition, const_cast<Tensor&>(*this), other);
+}
+
 // aten::norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
-inline at::Tensor Tensor::norm(const c10::optional<at::Scalar> & p, at::ScalarType dtype) const {
+inline at::Tensor Tensor::norm(const ::std::optional<at::Scalar> & p, at::ScalarType dtype) const {
     return at::_ops::norm_ScalarOpt_dtype::call(const_cast<Tensor&>(*this), p, dtype);
 }
 
@@ -3710,22 +3895,22 @@ inline at::Tensor Tensor::norm(const at::Scalar & p) const {
 }
 
 // aten::norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-inline at::Tensor Tensor::norm(const c10::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim, at::ScalarType dtype) const {
+inline at::Tensor Tensor::norm(const ::std::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim, at::ScalarType dtype) const {
     return at::_ops::norm_ScalarOpt_dim_dtype::call(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
 }
 
 // aten::norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::norm(const c10::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim) const {
+inline at::Tensor Tensor::norm(const ::std::optional<at::Scalar> & p, at::IntArrayRef dim, bool keepdim) const {
     return at::_ops::norm_ScalarOpt_dim::call(const_cast<Tensor&>(*this), p, dim, keepdim);
 }
 
 // aten::norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-inline at::Tensor Tensor::norm(const c10::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim, at::ScalarType dtype) const {
+inline at::Tensor Tensor::norm(const ::std::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim, at::ScalarType dtype) const {
     return at::_ops::norm_names_ScalarOpt_dim_dtype::call(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
 }
 
 // aten::norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
-inline at::Tensor Tensor::norm(const c10::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim) const {
+inline at::Tensor Tensor::norm(const ::std::optional<at::Scalar> & p, at::DimnameList dim, bool keepdim) const {
     return at::_ops::norm_names_ScalarOpt_dim::call(const_cast<Tensor&>(*this), p, dim, keepdim);
 }
 
@@ -3735,7 +3920,7 @@ inline ::std::tuple<at::Tensor,at::Tensor> Tensor::frexp() const {
 }
 
 // aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
-inline at::Tensor Tensor::clone(c10::optional<at::MemoryFormat> memory_format) const {
+inline at::Tensor Tensor::clone(::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::clone::call(const_cast<Tensor&>(*this), memory_format);
 }
 
@@ -3745,7 +3930,7 @@ inline at::Tensor Tensor::positive() const {
 }
 
 // aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
-inline const at::Tensor & Tensor::resize_as_(const at::Tensor & the_template, c10::optional<at::MemoryFormat> memory_format) const {
+inline const at::Tensor & Tensor::resize_as_(const at::Tensor & the_template, ::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::resize_as_::call(const_cast<Tensor&>(*this), the_template, memory_format);
 }
 
@@ -3839,14 +4024,19 @@ inline at::Tensor Tensor::sparse_mask(const at::Tensor & mask) const {
     return at::_ops::sparse_mask::call(const_cast<Tensor&>(*this), mask);
 }
 
-// aten::to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::to_dense(c10::optional<at::ScalarType> dtype) const {
-    return at::_ops::to_dense::call(const_cast<Tensor&>(*this), dtype);
+// aten::_sparse_mask_projection(Tensor self, Tensor mask, bool accumulate_matches=False) -> Tensor
+inline at::Tensor Tensor::_sparse_mask_projection(const at::Tensor & mask, bool accumulate_matches) const {
+    return at::_ops::_sparse_mask_projection::call(const_cast<Tensor&>(*this), mask, accumulate_matches);
 }
 
-// aten::_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::_to_dense(c10::optional<at::ScalarType> dtype) const {
-    return at::_ops::_to_dense::call(const_cast<Tensor&>(*this), dtype);
+// aten::to_dense(Tensor self, ScalarType? dtype=None, *, bool? masked_grad=None) -> Tensor
+inline at::Tensor Tensor::to_dense(::std::optional<at::ScalarType> dtype, ::std::optional<bool> masked_grad) const {
+    return at::_ops::to_dense::call(const_cast<Tensor&>(*this), dtype, masked_grad);
+}
+
+// aten::_to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
+inline at::Tensor Tensor::_to_dense(::std::optional<at::ScalarType> dtype, ::std::optional<bool> masked_grad) const {
+    return at::_ops::_to_dense::call(const_cast<Tensor&>(*this), dtype, masked_grad);
 }
 
 // aten::sparse_dim(Tensor self) -> int
@@ -3944,33 +4134,63 @@ inline at::Tensor Tensor::to_sparse(int64_t sparse_dim) const {
     return at::_ops::to_sparse_sparse_dim::call(const_cast<Tensor&>(*this), sparse_dim);
 }
 
-// aten::to_sparse(Tensor self) -> Tensor
-inline at::Tensor Tensor::to_sparse() const {
-    return at::_ops::to_sparse::call(const_cast<Tensor&>(*this));
+// aten::_to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+inline at::Tensor Tensor::_to_sparse(int64_t sparse_dim) const {
+    return at::_ops::_to_sparse_sparse_dim::call(const_cast<Tensor&>(*this), sparse_dim);
 }
 
-// aten::to_sparse_csr(Tensor self) -> Tensor
-inline at::Tensor Tensor::to_sparse_csr() const {
-    return at::_ops::to_sparse_csr::call(const_cast<Tensor&>(*this));
+// aten::to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::to_sparse(::std::optional<at::Layout> layout, at::OptionalIntArrayRef blocksize, ::std::optional<int64_t> dense_dim) const {
+    return at::_ops::to_sparse::call(const_cast<Tensor&>(*this), layout, blocksize, dense_dim);
 }
 
-// aten::to_sparse_csc(Tensor self) -> Tensor
-inline at::Tensor Tensor::to_sparse_csc() const {
-    return at::_ops::to_sparse_csc::call(const_cast<Tensor&>(*this));
+// aten::_to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::_to_sparse(::std::optional<at::Layout> layout, at::OptionalIntArrayRef blocksize, ::std::optional<int64_t> dense_dim) const {
+    return at::_ops::_to_sparse::call(const_cast<Tensor&>(*this), layout, blocksize, dense_dim);
 }
 
-// aten::to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
-inline at::Tensor Tensor::to_sparse_bsr(at::IntArrayRef blocksize) const {
-    return at::_ops::to_sparse_bsr::call(const_cast<Tensor&>(*this), blocksize);
+// aten::to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::to_sparse_csr(::std::optional<int64_t> dense_dim) const {
+    return at::_ops::to_sparse_csr::call(const_cast<Tensor&>(*this), dense_dim);
 }
 
-// aten::to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
-inline at::Tensor Tensor::to_sparse_bsc(at::IntArrayRef blocksize) const {
-    return at::_ops::to_sparse_bsc::call(const_cast<Tensor&>(*this), blocksize);
+// aten::_to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::_to_sparse_csr(::std::optional<int64_t> dense_dim) const {
+    return at::_ops::_to_sparse_csr::call(const_cast<Tensor&>(*this), dense_dim);
+}
+
+// aten::to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::to_sparse_csc(::std::optional<int64_t> dense_dim) const {
+    return at::_ops::to_sparse_csc::call(const_cast<Tensor&>(*this), dense_dim);
+}
+
+// aten::_to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::_to_sparse_csc(::std::optional<int64_t> dense_dim) const {
+    return at::_ops::_to_sparse_csc::call(const_cast<Tensor&>(*this), dense_dim);
+}
+
+// aten::to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::to_sparse_bsr(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim) const {
+    return at::_ops::to_sparse_bsr::call(const_cast<Tensor&>(*this), blocksize, dense_dim);
+}
+
+// aten::_to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::_to_sparse_bsr(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim) const {
+    return at::_ops::_to_sparse_bsr::call(const_cast<Tensor&>(*this), blocksize, dense_dim);
+}
+
+// aten::to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::to_sparse_bsc(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim) const {
+    return at::_ops::to_sparse_bsc::call(const_cast<Tensor&>(*this), blocksize, dense_dim);
+}
+
+// aten::_to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+inline at::Tensor Tensor::_to_sparse_bsc(at::IntArrayRef blocksize, ::std::optional<int64_t> dense_dim) const {
+    return at::_ops::_to_sparse_bsc::call(const_cast<Tensor&>(*this), blocksize, dense_dim);
 }
 
 // aten::to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
-inline at::Tensor Tensor::to_mkldnn(c10::optional<at::ScalarType> dtype) const {
+inline at::Tensor Tensor::to_mkldnn(::std::optional<at::ScalarType> dtype) const {
     return at::_ops::to_mkldnn::call(const_cast<Tensor&>(*this), dtype);
 }
 
@@ -4025,27 +4245,27 @@ inline at::Tensor Tensor::_autocast_to_full_precision(bool cuda_enabled, bool cp
 }
 
 // aten::to.dtype_layout(Tensor(a) self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
-inline at::Tensor Tensor::to(at::TensorOptions options, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) const {
-    return at::_ops::to_dtype_layout::call(const_cast<Tensor&>(*this), optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt(), non_blocking, copy, c10::impl::check_tensor_options_and_extract_memory_format(options, memory_format));
+inline at::Tensor Tensor::to(at::TensorOptions options, bool non_blocking, bool copy, ::std::optional<at::MemoryFormat> memory_format) const {
+    return at::_ops::to_dtype_layout::call(const_cast<Tensor&>(*this), c10::optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt(), non_blocking, copy, c10::impl::check_tensor_options_and_extract_memory_format(options, memory_format));
 }
 
 // aten::to.dtype_layout(Tensor(a) self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
-inline at::Tensor Tensor::to(c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) const {
+inline at::Tensor Tensor::to(::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory, bool non_blocking, bool copy, ::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::to_dtype_layout::call(const_cast<Tensor&>(*this), dtype, layout, device, pin_memory, non_blocking, copy, memory_format);
 }
 
 // aten::to.device(Tensor(a) self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
-inline at::Tensor Tensor::to(at::Device device, at::ScalarType dtype, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) const {
+inline at::Tensor Tensor::to(at::Device device, at::ScalarType dtype, bool non_blocking, bool copy, ::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::to_device::call(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy, memory_format);
 }
 
 // aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
-inline at::Tensor Tensor::to(at::ScalarType dtype, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) const {
+inline at::Tensor Tensor::to(at::ScalarType dtype, bool non_blocking, bool copy, ::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::to_dtype::call(const_cast<Tensor&>(*this), dtype, non_blocking, copy, memory_format);
 }
 
 // aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
-inline at::Tensor Tensor::to(const at::Tensor & other, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) const {
+inline at::Tensor Tensor::to(const at::Tensor & other, bool non_blocking, bool copy, ::std::optional<at::MemoryFormat> memory_format) const {
     return at::_ops::to_other::call(const_cast<Tensor&>(*this), other, non_blocking, copy, memory_format);
 }
 
@@ -4061,7 +4281,7 @@ inline at::Tensor & Tensor::set_(at::Storage source) const {
 
 // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
 inline at::Tensor & Tensor::set_(at::Storage source, int64_t storage_offset, at::IntArrayRef size, at::IntArrayRef stride) const {
-    return at::_ops::set__source_Storage_storage_offset::call(const_cast<Tensor&>(*this), source, storage_offset, c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride));
+    return at::_ops::set__source_Storage_storage_offset::call(const_cast<Tensor&>(*this), source, storage_offset, c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride));
 }
 
 // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
@@ -4071,7 +4291,7 @@ inline at::Tensor & Tensor::set__symint(at::Storage source, c10::SymInt storage_
 
 // aten::set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
 inline at::Tensor & Tensor::set_(const at::Tensor & source, int64_t storage_offset, at::IntArrayRef size, at::IntArrayRef stride) const {
-    return at::_ops::set__source_Tensor_storage_offset::call(const_cast<Tensor&>(*this), source, storage_offset, c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride));
+    return at::_ops::set__source_Tensor_storage_offset::call(const_cast<Tensor&>(*this), source, storage_offset, c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride));
 }
 
 // aten::set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
@@ -4126,7 +4346,7 @@ inline at::Tensor Tensor::masked_scatter(const at::Tensor & mask, const at::Tens
 
 // aten::view(Tensor(a) self, SymInt[] size) -> Tensor(a)
 inline at::Tensor Tensor::view(at::IntArrayRef size) const {
-    return at::_ops::view::call(const_cast<Tensor&>(*this), c10::fromIntArrayRef(size));
+    return at::_ops::view::call(const_cast<Tensor&>(*this), c10::fromIntArrayRefSlow(size));
 }
 
 // aten::view(Tensor(a) self, SymInt[] size) -> Tensor(a)
@@ -4535,42 +4755,42 @@ inline at::Tensor Tensor::addbmm(const at::Tensor & batch1, const at::Tensor & b
 }
 
 // aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::random_(int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::random_(int64_t from, ::std::optional<int64_t> to, ::std::optional<at::Generator> generator) const {
     return at::_ops::random__from::call(const_cast<Tensor&>(*this), from, to, generator);
 }
 
 // aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::random_(int64_t to, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::random_(int64_t to, ::std::optional<at::Generator> generator) const {
     return at::_ops::random__to::call(const_cast<Tensor&>(*this), to, generator);
 }
 
 // aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::random_(c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::random_(::std::optional<at::Generator> generator) const {
     return at::_ops::random_::call(const_cast<Tensor&>(*this), generator);
 }
 
 // aten::uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::uniform_(double from, double to, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::uniform_(double from, double to, ::std::optional<at::Generator> generator) const {
     return at::_ops::uniform_::call(const_cast<Tensor&>(*this), from, to, generator);
 }
 
 // aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::cauchy_(double median, double sigma, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::cauchy_(double median, double sigma, ::std::optional<at::Generator> generator) const {
     return at::_ops::cauchy_::call(const_cast<Tensor&>(*this), median, sigma, generator);
 }
 
 // aten::log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::log_normal_(double mean, double std, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::log_normal_(double mean, double std, ::std::optional<at::Generator> generator) const {
     return at::_ops::log_normal_::call(const_cast<Tensor&>(*this), mean, std, generator);
 }
 
 // aten::exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::exponential_(double lambd, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::exponential_(double lambd, ::std::optional<at::Generator> generator) const {
     return at::_ops::exponential_::call(const_cast<Tensor&>(*this), lambd, generator);
 }
 
 // aten::geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::geometric_(double p, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::geometric_(double p, ::std::optional<at::Generator> generator) const {
     return at::_ops::geometric_::call(const_cast<Tensor&>(*this), p, generator);
 }
 
@@ -4580,7 +4800,7 @@ inline at::Tensor Tensor::diag(int64_t diagonal) const {
 }
 
 // aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor
-inline at::Tensor Tensor::cross(const at::Tensor & other, c10::optional<int64_t> dim) const {
+inline at::Tensor Tensor::cross(const at::Tensor & other, ::std::optional<int64_t> dim) const {
     return at::_ops::cross::call(const_cast<Tensor&>(*this), other, dim);
 }
 
@@ -4815,7 +5035,7 @@ inline at::Tensor Tensor::take(const at::Tensor & index) const {
 }
 
 // aten::take_along_dim(Tensor self, Tensor indices, int? dim=None) -> Tensor
-inline at::Tensor Tensor::take_along_dim(const at::Tensor & indices, c10::optional<int64_t> dim) const {
+inline at::Tensor Tensor::take_along_dim(const at::Tensor & indices, ::std::optional<int64_t> dim) const {
     return at::_ops::take_along_dim::call(const_cast<Tensor&>(*this), indices, dim);
 }
 
@@ -4837,6 +5057,11 @@ inline at::Tensor Tensor::masked_select(const at::Tensor & mask) const {
 // aten::nonzero(Tensor self) -> Tensor
 inline at::Tensor Tensor::nonzero() const {
     return at::_ops::nonzero::call(const_cast<Tensor&>(*this));
+}
+
+// aten::nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
+inline at::Tensor Tensor::nonzero_static(int64_t size, int64_t fill_value) const {
+    return at::_ops::nonzero_static::call(const_cast<Tensor&>(*this), size, fill_value);
 }
 
 // aten::nonzero_numpy(Tensor self) -> Tensor[]
@@ -4882,11 +5107,6 @@ inline at::Tensor & Tensor::addcdiv_(const at::Tensor & tensor1, const at::Tenso
 // aten::triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
 inline ::std::tuple<at::Tensor,at::Tensor> Tensor::triangular_solve(const at::Tensor & A, bool upper, bool transpose, bool unitriangular) const {
     return at::_ops::triangular_solve::call(const_cast<Tensor&>(*this), A, upper, transpose, unitriangular);
-}
-
-// aten::symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::symeig(bool eigenvectors, bool upper) const {
-    return at::_ops::symeig::call(const_cast<Tensor&>(*this), eigenvectors, upper);
 }
 
 // aten::svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
@@ -4955,7 +5175,7 @@ inline at::Tensor Tensor::lu_solve(const at::Tensor & LU_data, const at::Tensor 
 }
 
 // aten::multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
-inline at::Tensor Tensor::multinomial(int64_t num_samples, bool replacement, c10::optional<at::Generator> generator) const {
+inline at::Tensor Tensor::multinomial(int64_t num_samples, bool replacement, ::std::optional<at::Generator> generator) const {
     return at::_ops::multinomial::call(const_cast<Tensor&>(*this), num_samples, replacement, generator);
 }
 
@@ -5060,12 +5280,12 @@ inline at::Tensor Tensor::histc(int64_t bins, const at::Scalar & min, const at::
 }
 
 // aten::histogram.bins_tensor(Tensor self, Tensor bins, *, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::histogram(const at::Tensor & bins, const c10::optional<at::Tensor> & weight, bool density) const {
+inline ::std::tuple<at::Tensor,at::Tensor> Tensor::histogram(const at::Tensor & bins, const ::std::optional<at::Tensor> & weight, bool density) const {
     return at::_ops::histogram_bins_tensor::call(const_cast<Tensor&>(*this), bins, weight, density);
 }
 
 // aten::histogram.bin_ct(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::histogram(int64_t bins, c10::optional<at::ArrayRef<double>> range, const c10::optional<at::Tensor> & weight, bool density) const {
+inline ::std::tuple<at::Tensor,at::Tensor> Tensor::histogram(int64_t bins, ::std::optional<at::ArrayRef<double>> range, const ::std::optional<at::Tensor> & weight, bool density) const {
     return at::_ops::histogram_bin_ct::call(const_cast<Tensor&>(*this), bins, range, weight, density);
 }
 
@@ -5190,22 +5410,22 @@ inline at::Tensor Tensor::min(const at::Tensor & other) const {
 }
 
 // aten::quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
-inline at::Tensor Tensor::quantile(const at::Tensor & q, c10::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
+inline at::Tensor Tensor::quantile(const at::Tensor & q, ::std::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
     return at::_ops::quantile::call(const_cast<Tensor&>(*this), q, dim, keepdim, interpolation);
 }
 
 // aten::quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
-inline at::Tensor Tensor::quantile(double q, c10::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
+inline at::Tensor Tensor::quantile(double q, ::std::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
     return at::_ops::quantile_scalar::call(const_cast<Tensor&>(*this), q, dim, keepdim, interpolation);
 }
 
 // aten::nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
-inline at::Tensor Tensor::nanquantile(const at::Tensor & q, c10::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
+inline at::Tensor Tensor::nanquantile(const at::Tensor & q, ::std::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
     return at::_ops::nanquantile::call(const_cast<Tensor&>(*this), q, dim, keepdim, interpolation);
 }
 
 // aten::nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
-inline at::Tensor Tensor::nanquantile(double q, c10::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
+inline at::Tensor Tensor::nanquantile(double q, ::std::optional<int64_t> dim, bool keepdim, c10::string_view interpolation) const {
     return at::_ops::nanquantile_scalar::call(const_cast<Tensor&>(*this), q, dim, keepdim, interpolation);
 }
 
@@ -5215,7 +5435,7 @@ inline ::std::tuple<at::Tensor,at::Tensor> Tensor::sort(int64_t dim, bool descen
 }
 
 // aten::sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::sort(c10::optional<bool> stable, int64_t dim, bool descending) const {
+inline ::std::tuple<at::Tensor,at::Tensor> Tensor::sort(::std::optional<bool> stable, int64_t dim, bool descending) const {
     return at::_ops::sort_stable::call(const_cast<Tensor&>(*this), stable, dim, descending);
 }
 
@@ -5225,7 +5445,7 @@ inline ::std::tuple<at::Tensor,at::Tensor> Tensor::sort(at::Dimname dim, bool de
 }
 
 // aten::sort.dimname_stable(Tensor self, *, bool? stable, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
-inline ::std::tuple<at::Tensor,at::Tensor> Tensor::sort(c10::optional<bool> stable, at::Dimname dim, bool descending) const {
+inline ::std::tuple<at::Tensor,at::Tensor> Tensor::sort(::std::optional<bool> stable, at::Dimname dim, bool descending) const {
     return at::_ops::sort_dimname_stable::call(const_cast<Tensor&>(*this), stable, dim, descending);
 }
 
@@ -5249,8 +5469,13 @@ inline at::Tensor Tensor::argsort(at::Dimname dim, bool descending) const {
     return at::_ops::argsort_dimname::call(const_cast<Tensor&>(*this), dim, descending);
 }
 
-// aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
+// aten::topk(Tensor self, SymInt k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
 inline ::std::tuple<at::Tensor,at::Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
+    return at::_ops::topk::call(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+}
+
+// aten::topk(Tensor self, SymInt k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
+inline ::std::tuple<at::Tensor,at::Tensor> Tensor::topk_symint(c10::SymInt k, int64_t dim, bool largest, bool sorted) const {
     return at::_ops::topk::call(const_cast<Tensor&>(*this), k, dim, largest, sorted);
 }
 
@@ -5325,7 +5550,7 @@ inline at::Tensor & Tensor::float_power_(const at::Tensor & exponent) const {
 }
 
 // aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
-inline at::Tensor & Tensor::normal_(double mean, double std, c10::optional<at::Generator> generator) const {
+inline at::Tensor & Tensor::normal_(double mean, double std, ::std::optional<at::Generator> generator) const {
     return at::_ops::normal_::call(const_cast<Tensor&>(*this), mean, std, generator);
 }
 
@@ -5394,14 +5619,14 @@ inline at::Tensor Tensor::ger(const at::Tensor & vec2) const {
     return at::_ops::ger::call(const_cast<Tensor&>(*this), vec2);
 }
 
-// aten::to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+// aten::to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
 inline at::Tensor Tensor::to_padded_tensor(double padding, at::OptionalIntArrayRef output_size) const {
-    return at::_ops::to_padded_tensor::call(const_cast<Tensor&>(*this), padding, output_size);
+    return at::_ops::to_padded_tensor::call(const_cast<Tensor&>(*this), padding, output_size.has_value() ? ::std::make_optional(c10::fromIntArrayRefSlow(*output_size)) : ::std::nullopt);
 }
 
-// aten::_nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
-inline at::Tensor Tensor::_nested_tensor_layer_norm(const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, double eps) const {
-    return at::_ops::_nested_tensor_layer_norm::call(const_cast<Tensor&>(*this), weight, bias, eps);
+// aten::to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
+inline at::Tensor Tensor::to_padded_tensor_symint(double padding, at::OptionalSymIntArrayRef output_size) const {
+    return at::_ops::to_padded_tensor::call(const_cast<Tensor&>(*this), padding, output_size);
 }
 } // namespace at
 
@@ -5490,10 +5715,10 @@ struct ExclusivelyOwnedTraits<at::Tensor> {
 namespace at {
 
 inline c10::MaybeOwned<Tensor> borrow_from_optional_tensor(
-    const c10::optional<Tensor>& opt) {
+    const std::optional<Tensor>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
 }
 
 inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_format) const & {
