@@ -31,7 +31,9 @@
 #include <ATen/ops/_log_softmax_backward_data_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/_make_dual_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/_neg_view_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/_nested_get_values_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/_nested_view_from_buffer_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/_nested_view_from_jagged_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/_reshape_alias_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/_softmax_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/_softmax_backward_data_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -70,6 +72,7 @@
 #include <ATen/ops/argmin_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/as_strided_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/as_strided_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/as_strided_scatter_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/asin_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/asinh_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/atan_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -80,6 +83,7 @@
 #include <ATen/ops/avg_pool3d_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/avg_pool3d_backward_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/baddbmm_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/bernoulli_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/bitwise_and_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/bitwise_left_shift_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/bitwise_not_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -88,11 +92,13 @@
 #include <ATen/ops/bitwise_xor_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/bmm_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/cat_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/ccol_indices_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/ceil_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/clamp_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/clamp_max_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/clamp_min_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/col_indices_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/copysign_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/cos_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/cosh_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -100,7 +106,9 @@
 #include <ATen/ops/cumprod_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/cumsum_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/detach_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/diag_embed_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/diagonal_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/diagonal_scatter_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/digamma_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/div_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/elu_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -151,6 +159,7 @@
 #include <ATen/ops/leaky_relu_backward_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/lerp_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/lgamma_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/lift_fresh_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/linalg_cholesky_ex_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/linalg_cross_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/linalg_inv_ex_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -209,12 +218,14 @@
 #include <ATen/ops/replication_pad2d_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/replication_pad3d_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/round_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/row_indices_copy_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/rsqrt_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/scatter_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/scatter_add_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/scatter_reduce_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/select_backward_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/select_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/select_scatter_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/sgn_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/sigmoid_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/sigmoid_backward_compositeexplicitautogradnonfunctional_dispatch.h>
@@ -226,6 +237,7 @@
 #include <ATen/ops/sinc_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/sinh_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/slice_copy_compositeexplicitautogradnonfunctional_dispatch.h>
+#include <ATen/ops/slice_scatter_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/slow_conv_transpose2d_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/smooth_l1_loss_compositeexplicitautogradnonfunctional_dispatch.h>
 #include <ATen/ops/softplus_compositeexplicitautogradnonfunctional_dispatch.h>

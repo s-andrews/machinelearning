@@ -13,7 +13,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 
 
@@ -36,7 +36,6 @@ inline at::Tensor & arctan_(at::Tensor & self) {
 inline at::Tensor & arctan_out(at::Tensor & out, const at::Tensor & self) {
     return at::_ops::arctan_out::call(self, out);
 }
-
 // aten::arctan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 inline at::Tensor & arctan_outf(const at::Tensor & self, at::Tensor & out) {
     return at::_ops::arctan_out::call(self, out);

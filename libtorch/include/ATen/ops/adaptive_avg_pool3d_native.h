@@ -6,7 +6,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/core/QScheme.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/Tensor.h>
@@ -16,7 +16,7 @@
 
 namespace at {
 namespace native {
-TORCH_API at::Tensor adaptive_avg_pool3d(const at::Tensor & self, at::IntArrayRef output_size);
+TORCH_API at::Tensor adaptive_avg_pool3d_symint(const at::Tensor & self, c10::SymIntArrayRef output_size);
 TORCH_API at::Tensor & adaptive_avg_pool3d_out_cpu(const at::Tensor & self, at::IntArrayRef output_size, at::Tensor & out);
 TORCH_API at::Tensor & adaptive_avg_pool3d_out_cuda(const at::Tensor & self, at::IntArrayRef output_size, at::Tensor & out);
 TORCH_API at::Tensor & adaptive_avg_pool3d_out_quantized_cpu(const at::Tensor & self, at::IntArrayRef output_size, at::Tensor & out);

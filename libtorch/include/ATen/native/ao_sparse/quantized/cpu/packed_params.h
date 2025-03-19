@@ -9,21 +9,21 @@ namespace sparse {
 
 // <Weight, bias, out_features_block_size, in_features_block_size>
 using LinearPackedSerializationType =
-    std::tuple<at::Tensor, c10::optional<at::Tensor>, std::vector<int64_t>>;
+    std::tuple<at::Tensor, std::optional<at::Tensor>, std::vector<int64_t>>;
 
-#define SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION 1
+#define SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION 2
 
 using BCSRSerializationType =
     std::tuple<
         int64_t,                    // Serialization Version
-        c10::optional<at::Tensor>,  // Bias
+        std::optional<at::Tensor>,  // Bias
         int64_t,                    // Out Features (Row) Block Size
         int64_t,                    // In Features (Column) Block Size
         at::Tensor,                 // Weight Scales (single element vector if per-tensor) (float)
         at::Tensor,                 // Wrapper for Weight Zero Points (single element vector if per-tensor) (int8_t)
         bool,                       // Quantization Scheme (true: per tensor, false: per channel)
-        at::Tensor,                 // Wrapper for Row Block Indices (int32_t)
-        at::Tensor,                 // Wrapper for Column Block Indices (int32_t)
+        at::Tensor,                 // Wrapper for Row Block Indices (int8_t, int16_t, or int32_t)
+        at::Tensor,                 // Wrapper for Column Block Indices (int8_t, int16_t, or int32_t)
         at::Tensor,                 // Wrapper for Non-Zero Weight Values, each +128 (uint8_t)
         int64_t,                    // Number of Output Channels
         int64_t                     // Number of Input Channels
@@ -60,9 +60,9 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
 
   virtual BCSRSerializationType serialize() = 0;
 
-  virtual c10::optional<at::Tensor> bias() = 0;
+  virtual std::optional<at::Tensor> bias() = 0;
 
-  virtual void set_bias(const c10::optional<at::Tensor>& bias) {
+  virtual void set_bias(const std::optional<at::Tensor>& bias) {
     throw std::runtime_error(
         "set_bias is not implemented for this packed "
         "parameter type");

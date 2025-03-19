@@ -1,6 +1,5 @@
 #pragma once
 
-#include <assert.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
@@ -19,7 +18,6 @@
 #include <thrust/pair.h>
 
 #include <ATen/native/cuda/jit_utils.h>
-#include <iostream>
 
 namespace at { namespace native {
 
@@ -315,7 +313,7 @@ struct ReduceJitOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -378,7 +376,7 @@ struct ReduceOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -484,7 +482,7 @@ struct ReduceOp {
   template <int output_vec_size>
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
     if (config.vectorize_input) {
-      assert(output_vec_size == 1);
+      CUDA_KERNEL_ASSERT(output_vec_size == 1);
       // reduce at the header of input_slice where memory is not aligned,
       // so that thread_reduce will have an aligned memory to work on.
       return {input_vectorized_thread_reduce_impl(data)};
@@ -721,7 +719,7 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    assert(!final_output);
+    CUDA_KERNEL_ASSERT(!final_output);
     return (out_scalar_t)value;
   }
 
@@ -734,7 +732,7 @@ struct ReduceOp {
     at::detail::Array<arg_t, output_vec_size>,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    assert(false); // can't use AT_ASSERT in Cuda.
+    CUDA_KERNEL_ASSERT(false);
     return arg_t {};
   }
 
@@ -746,13 +744,13 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    assert(false);
+    CUDA_KERNEL_ASSERT(false);
     return *out;
   }
 
   template<class T>
   C10_DEVICE void set_results(const T x, const index_t base_offset) const {
-    assert(noutputs == 1);
+    CUDA_KERNEL_ASSERT(noutputs == 1);
     auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
     *res = x;
   }
@@ -774,7 +772,7 @@ struct ReduceOp {
 
   template <int output_vec_size>
   C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<index_t, output_vec_size> base_offset) const {
-    assert(final_output);
+    CUDA_KERNEL_ASSERT(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       set_results(ops.project(value[i]), base_offset[i]);
@@ -809,6 +807,7 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+      __threadfence(); // complete the acquire pattern after atomic
       value = ident;
       if (config.should_block_x_reduce()) {
         index_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;
@@ -1056,7 +1055,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // Case 1: "vectorize along input"
   // This case happens when we are reducing along fastest moving dimesion. In such case, threads
   // with the same threadIdx.y works on the same reduction cooperatively and will produce results
-  // for the same ouput. In such case, values in each loaded vector always correspond to the same ouput.
+  // for the same output. In such case, values in each loaded vector always correspond to the same output.
   //
   // Case 2: "vectorize along output"
   // This case happens when the fastest moving dimesion is not the dimension of reduction. In such case,
@@ -1068,6 +1067,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
       // Note that if vt0 < ReduceConfig::vec_size, then this means the register pressure could be high, in such case,
       // we should avoid vectorization.
       config.vectorize_input = true;
+      dim0 /= config.input_vec_size;
     } else if (!reduction_on_fastest_striding_dimension) {
       // Case 2: "vectorize along output"
       config.output_vec_size = get_output_vec_size<scalar_t>(iter);
@@ -1091,7 +1091,10 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
+
+  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -1101,9 +1104,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  constexpr int min_values_per_thread = 16;
-  constexpr int max_values_per_thread = 256;
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
+  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
@@ -1135,8 +1136,23 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
+  // at::Half/at::ComplexHalf overflows easily as it's range is very small.
+  // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_half_or_chalf =
+      (std::is_same<at::Half, scalar_t>::value &&
+       std::is_same<at::Half, out_scalar_t>::value) ||
+      (std::is_same<c10::complex<Half>, scalar_t>::value &&
+       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+  // at::BFloat16 has lower precision and can lead to rounding errors.
+  // So when scalar_t and out_scalar_t are at::BFloat16, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_bfloat16 =
+      (std::is_same<at::BFloat16, scalar_t>::value &&
+       std::is_same<at::BFloat16, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value;
+      std::is_convertible<arg_t, out_scalar_t>::value &&
+      !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
@@ -1174,11 +1190,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1227,9 +1243,23 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   //TODO - this will be different for more complicated reductions, but for now reductions using
   //func_wrapper all have arg_t = opmath
   using arg_t = at::opmath_type<scalar_t>;
+  // at::Half/at::ComplexHalf overflows easily as it's range is very small.
+  // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_half_or_chalf =
+      (std::is_same<at::Half, scalar_t>::value &&
+       std::is_same<at::Half, out_scalar_t>::value) ||
+      (std::is_same<c10::complex<Half>, scalar_t>::value &&
+       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+  // at::BFloat16 has lower precision and can lead to rounding errors.
+  // So when scalar_t and out_scalar_t are at::BFloat16, we
+  // set can_accumulate_in_output to False.
+  static constexpr bool is_inp_out_type_bfloat16 =
+      (std::is_same<at::BFloat16, scalar_t>::value &&
+       std::is_same<at::BFloat16, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value;
-  static_assert(can_accumulate_in_output == true, "unsupported arg_t for jitted reduction");
+      std::is_convertible<arg_t, out_scalar_t>::value &&
+      !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
@@ -1269,11 +1299,11 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 

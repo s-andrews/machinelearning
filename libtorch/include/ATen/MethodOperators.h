@@ -26,15 +26,23 @@
 #include <ATen/ops/_dimV_ops.h>
 #include <ATen/ops/_fw_primal_ops.h>
 #include <ATen/ops/_indices_ops.h>
+#include <ATen/ops/_is_all_true_ops.h>
+#include <ATen/ops/_is_any_true_ops.h>
 #include <ATen/ops/_is_zerotensor_ops.h>
+#include <ATen/ops/_lazy_clone_ops.h>
 #include <ATen/ops/_neg_view_ops.h>
-#include <ATen/ops/_nested_tensor_layer_norm_ops.h>
-#include <ATen/ops/_nested_tensor_offsets_ops.h>
 #include <ATen/ops/_nested_tensor_size_ops.h>
+#include <ATen/ops/_nested_tensor_storage_offsets_ops.h>
 #include <ATen/ops/_nested_tensor_strides_ops.h>
 #include <ATen/ops/_nnz_ops.h>
 #include <ATen/ops/_reshape_alias_ops.h>
+#include <ATen/ops/_sparse_mask_projection_ops.h>
 #include <ATen/ops/_to_dense_ops.h>
+#include <ATen/ops/_to_sparse_bsc_ops.h>
+#include <ATen/ops/_to_sparse_bsr_ops.h>
+#include <ATen/ops/_to_sparse_csc_ops.h>
+#include <ATen/ops/_to_sparse_csr_ops.h>
+#include <ATen/ops/_to_sparse_ops.h>
 #include <ATen/ops/_values_ops.h>
 #include <ATen/ops/_version_ops.h>
 #include <ATen/ops/abs_ops.h>
@@ -287,6 +295,7 @@
 #include <ATen/ops/nextafter_ops.h>
 #include <ATen/ops/nonzero_numpy_ops.h>
 #include <ATen/ops/nonzero_ops.h>
+#include <ATen/ops/nonzero_static_ops.h>
 #include <ATen/ops/norm_ops.h>
 #include <ATen/ops/normal_ops.h>
 #include <ATen/ops/not_equal_ops.h>
@@ -302,7 +311,6 @@
 #include <ATen/ops/polygamma_ops.h>
 #include <ATen/ops/positive_ops.h>
 #include <ATen/ops/pow_ops.h>
-#include <ATen/ops/prelu_backward_ops.h>
 #include <ATen/ops/prelu_ops.h>
 #include <ATen/ops/prod_ops.h>
 #include <ATen/ops/put_ops.h>
@@ -357,6 +365,7 @@
 #include <ATen/ops/sinc_ops.h>
 #include <ATen/ops/sinh_ops.h>
 #include <ATen/ops/size_ops.h>
+#include <ATen/ops/slice_inverse_ops.h>
 #include <ATen/ops/slice_ops.h>
 #include <ATen/ops/slice_scatter_ops.h>
 #include <ATen/ops/slogdet_ops.h>
@@ -383,7 +392,6 @@
 #include <ATen/ops/svd_ops.h>
 #include <ATen/ops/swapaxes_ops.h>
 #include <ATen/ops/swapdims_ops.h>
-#include <ATen/ops/symeig_ops.h>
 #include <ATen/ops/t_ops.h>
 #include <ATen/ops/take_along_dim_ops.h>
 #include <ATen/ops/take_ops.h>
