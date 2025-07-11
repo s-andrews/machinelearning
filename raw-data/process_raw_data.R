@@ -1,9 +1,11 @@
 library(tidyverse)
 #library(tidymodels)
 #tidymodels_prefer()
+library(rsample)
 
 
-read_delim("raw-data/hca_model_data.txt") -> data
+#read_delim("raw-data/hca_model_data.txt") -> data
+read_delim("raw-data/hca_model_data_smaller.csv") -> data
 
 # The predicted variable needs to be factor
 data %>%
